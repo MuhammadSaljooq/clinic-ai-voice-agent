@@ -107,9 +107,18 @@ Run: `.venv/bin/pytest tests/test_audio_codec.py -q` -> `ModuleNotFoundError`
 - [ ] **Step 1: Tests** -- config sets `AUDIO` modality, `enable_affective_dialog`,
       context compression, session resumption, both transcriptions; the system
       instruction contains the AI disclosure and the no-medical-advice guardrail;
-      every tool declaration is `NON_BLOCKING`; a resumption handle is threaded
-      through when supplied; provider seam returns Vertex config when
-      `AI_PROVIDER=vertex`.
+      **read** tools are `NON_BLOCKING` and **write** tools are
+      `BLOCKING`; a resumption handle is threaded through when supplied; provider
+      seam returns Vertex config when `AI_PROVIDER=vertex`.
+
+**Revision to this plan:** it originally said *every* tool should be
+`NON_BLOCKING`. That is wrong for writes. A non-blocking write lets the model keep
+talking -- and say "you're all booked" -- while the transaction is still in flight
+and may yet come back `SlotTaken`. Reads stay `NON_BLOCKING` so the line never goes
+silent. There is also no dead-air cost to blocking on a write here: choosing
+Postgres over the Google Calendar API in Plan 1 dropped tool latency from
+200-800 ms to about a millisecond, which removes most of the original motivation
+for non-blocking writes in the first place.
 - [ ] **Step 2: Run, confirm failure.**
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run, confirm pass. Commit.**
