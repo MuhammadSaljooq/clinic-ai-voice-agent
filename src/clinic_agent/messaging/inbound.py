@@ -74,6 +74,7 @@ async def handle_inbound(
     from_number: str,
     text: str,
     now: datetime | None = None,
+    mirror=None,
 ) -> InboundResult:
     now = now or datetime.now(UTC)
     word = normalise(text)
@@ -115,6 +116,9 @@ async def handle_inbound(
         # one-letter text would be too blunt.
         soonest = upcoming[0]
         await cancel(pool, soonest.appointment_id)
+        if mirror is not None:
+            # Otherwise the cancelled slot stays on the provider's phone.
+            await mirror.on_cancelled(pool, soonest.appointment_id)
         log.info("appointment %s cancelled by SMS", soonest.appointment_id)
         return InboundResult(
             "cancelled", compose_cancellation_confirmation(clinic, phone_display)

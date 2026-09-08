@@ -425,3 +425,62 @@ async def test_a_scripted_call_books_a_real_appointment_end_to_end(router):
     )
     assert stored["name"] == "Ada Lovelace"
     assert stored["phone"] == CALLER, "caller ID was used without asking"
+
+
+# --- calendar mirror wiring ----------------------------------------------------
+
+
+class SpyMirror:
+    def __init__(self):
+        self.calls: list[tuple[str, int]] = []
+
+    async def on_booked(self, pool, appointment_id):
+        self.calls.append(("booked", appointment_id))
+
+    async def on_rescheduled(self, pool, appointment_id):
+        self.calls.append(("rescheduled", appointment_id))
+
+    async def on_cancelled(self, pool, appointment_id):
+        self.calls.append(("cancelled", appointment_id))
+
+
+class ExplodingMirror:
+    async def on_booked(self, pool, appointment_id):
+        raise RuntimeError("Google is down")
+
+
+async def test_booking_rescheduling_and_cancelling_all_reach_the_calendar(router):
+    route, _, _ = router
+    spy = SpyMirror()
+    route.mirror = spy
+
+    ctx = new_ctx()
+    await route("find_slots", {"appointment_type": FOLLOW_UP}, ctx)
+    booked = await route("book_appointment", {"option": 1, "patient_name": "Ada"}, ctx)
+
+    later = new_ctx()
+    await route("lookup_appointment", {}, later)
+    await route("find_slots", {"appointment_type": FOLLOW_UP, "part_of_day": "afternoon"}, later)
+    await route("reschedule_appointment",
+                {"appointment_id": booked["appointment_id"], "option": 1}, later)
+    await route("cancel_appointment", {"appointment_id": booked["appointment_id"]}, later)
+
+    assert spy.calls == [
+        ("booked", booked["appointment_id"]),
+        ("rescheduled", booked["appointment_id"]),
+        ("cancelled", booked["appointment_id"]),
+    ]
+
+
+async def test_booking_still_succeeds_when_the_calendar_mirror_raises(router):
+    """A real CalendarMirror swallows its own errors, but the router must not depend
+    on that -- losing a booking because Google was down is unacceptable."""
+    route, _, pool = router
+    route.mirror = ExplodingMirror()
+
+    ctx = new_ctx()
+    await route("find_slots", {"appointment_type": FOLLOW_UP}, ctx)
+    result = await route("book_appointment", {"option": 1, "patient_name": "Ada"}, ctx)
+
+    assert result.get("booked") is True, f"booking was lost: {result}"
+    assert await pool.fetchval("SELECT count(*) FROM appointments WHERE status='booked'") == 1

@@ -24,6 +24,7 @@ from clinic_agent.telephony.signature import (
     verify_webhook,
 )
 from clinic_agent.telephony.telnyx_client import TelnyxClient
+from clinic_agent.web.dashboard import build_dashboard
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +42,10 @@ class AppDeps:
     # directly, it goes through the tool handler.
     pool: Any | None = None
     sms_from_number: str | None = None
+    mirror: Any | None = None
+    # Dashboard is mounted only when a password is set, so it cannot be exposed by
+    # forgetting to configure it.
+    dashboard_password: str | None = None
 
 
 class TelnyxWebSocketAdapter:
@@ -136,7 +141,7 @@ def create_app(deps: AppDeps, *, lifespan: Any | None = None) -> FastAPI:
         text = message.get("text") or ""
 
         result = await handle_inbound(
-            deps.pool, deps.cfg, from_number=sender, text=text
+            deps.pool, deps.cfg, from_number=sender, text=text, mirror=deps.mirror
         )
         log.info("inbound SMS handled: %s", result.action)
 
@@ -150,6 +155,12 @@ def create_app(deps: AppDeps, *, lifespan: Any | None = None) -> FastAPI:
                 log.exception("could not send the SMS reply")
 
         return Response(status_code=200, content=result.action)
+
+    if deps.dashboard_password:
+        # pool is resolved lazily: the lifespan fills it in after the app is built.
+        app.include_router(
+            build_dashboard(deps.cfg, lambda: deps.pool, deps.dashboard_password)
+        )
 
     @app.websocket("/telnyx/stream")
     async def telnyx_stream(websocket: WebSocket) -> None:

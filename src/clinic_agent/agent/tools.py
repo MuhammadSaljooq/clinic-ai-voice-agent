@@ -19,6 +19,7 @@ apologise and recover mid-sentence instead of the call falling over.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -41,6 +42,8 @@ from clinic_agent.scheduling.booking import (
 from clinic_agent.scheduling.service import OfferedSlot, available_slots, spoken_datetime
 from clinic_agent.scheduling.tokens import InvalidSlotToken
 
+log = logging.getLogger(__name__)
+
 OFFERS_KEY = "offers"
 AUTHORISED_KEY = "authorised_appointment_ids"
 PATIENT_NAME_KEY = "patient_name"
@@ -59,6 +62,9 @@ class ToolRouter:
     cfg: ClinicConfig
     secret: str
     telnyx: Any | None = None
+    # Optional: when absent, bookings simply are not mirrored. The mirror must never
+    # be able to affect whether a booking succeeds.
+    mirror: Any | None = None
     clock: Callable[[], datetime] = lambda: datetime.now(UTC)
 
     async def __call__(self, name: str, args: dict, ctx: ToolContext) -> dict:
@@ -89,6 +95,21 @@ class ToolRouter:
 
     def _provider_by_name(self, name: str | None):
         return next((p for p in self.cfg.providers if p.name == name), None)
+
+    async def _mirror(self, event: str, appointment_id: int) -> None:
+        """Fire a calendar mirror hook without ever letting it fail the operation.
+
+        By the time these run, the appointment is already committed. Letting an
+        exception escape would tell the caller their booking failed when it
+        succeeded -- and they would book again, creating a duplicate. CalendarMirror
+        swallows its own errors, but this must not depend on that.
+        """
+        if self.mirror is None:
+            return
+        try:
+            await getattr(self.mirror, f"on_{event}")(self.pool, appointment_id)
+        except Exception:
+            log.exception("calendar mirror hook on_%s failed for %s", event, appointment_id)
 
     def _describe(self, appointment) -> dict:
         return {
@@ -222,6 +243,8 @@ class ToolRouter:
         ctx.state[OFFERS_KEY] = {}
         self._authorised(ctx).add(booked.appointment_id)
 
+        await self._mirror("booked", booked.appointment_id)
+
         return {
             "booked": True,
             "appointment_id": booked.appointment_id,
@@ -293,6 +316,7 @@ class ToolRouter:
             return {"error": "that offer has expired", "recovery": "Call find_slots again."}
 
         ctx.state[OFFERS_KEY] = {}
+        await self._mirror("rescheduled", appointment_id)
         return {
             "rescheduled": True,
             "appointment_id": moved.appointment_id,
@@ -315,6 +339,7 @@ class ToolRouter:
                 "error": "that appointment was already cancelled",
                 "recovery": "Confirm to the caller that nothing is booked.",
             }
+        await self._mirror("cancelled", appointment_id)
         return {"cancelled": True, "appointment_id": appointment_id}
 
     async def _answer_faq(self, args: dict, ctx: ToolContext) -> dict:

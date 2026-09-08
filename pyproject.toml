@@ -37,6 +37,17 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 
+[tool.ruff.lint.flake8-bugbear]
+# Depends()/Query() in argument defaults is the FastAPI idiom, not the mutable-default
+# bug B008 exists to catch.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
