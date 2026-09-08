@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pathlib
 from datetime import time
+from itertools import pairwise
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
@@ -62,7 +63,7 @@ class ProviderConfig(BaseModel):
             by_day.setdefault(window.weekday_index, []).append(window)
         for day, windows in by_day.items():
             ordered = sorted(windows, key=lambda w: w.start)
-            for earlier, later in zip(ordered, ordered[1:], strict=False):
+            for earlier, later in pairwise(ordered):
                 if later.start < earlier.end:
                     raise ValueError(
                         f"provider {self.name!r} has overlapping availability on "
