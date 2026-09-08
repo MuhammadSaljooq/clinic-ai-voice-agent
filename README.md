@@ -83,9 +83,34 @@ dial your laptop. For local development, tunnel with ngrok and point
 The agent can now answer, disclose that it is an AI, find slots, book, reschedule,
 cancel, answer questions from `config.yaml`, and transfer to a human.
 
-Still to come: the Google Calendar mirror and SMS reminders (Plan 4) and the
-dashboard (Plan 5). Nothing has been verified against the real Telnyx or Gemini
-APIs yet -- that needs credentials in `.env`.
+All five phases are built. Verified against the real Gemini API by a simulated
+call that booked an appointment end to end; **not yet verified against Telnyx**,
+which needs a call to land (see Known gaps).
+
+## Dashboard
+
+Set `DASHBOARD_PASSWORD` in `.env` and visit `/dashboard`. Any username, that
+password. Three read-only pages: recent calls with transcripts, upcoming
+appointments, and the reminder log. Leave the variable unset and the dashboard is
+not mounted at all.
+
+## Known gaps
+
+- **Reminders are off.** `reminders.enabled: false` in `config.yaml` until 10DLC
+  brand and campaign registration is approved. While off, the agent is explicitly
+  told not to promise a reminder. `dry_run: true` records the exact message body
+  so the wording can be reviewed on the dashboard before anyone is texted.
+- **Calendar mirror is optional** and inert until `GOOGLE_CALENDAR_ID` and
+  `GOOGLE_SERVICE_ACCOUNT_JSON` are set. Share the clinic calendar with the service
+  account email; no OAuth verification is required.
+- **Telnyx has never delivered a real call to this code.** A trial Telnyx account
+  only accepts calls from verified numbers, which is what produced a busy signal
+  on the first attempt.
+- **Reply latency measured 7-8s** on the simulated call, against a target of under
+  800ms. Disabling model thinking did not fix it; the remaining suspect is
+  end-of-speech VAD sensitivity.
+- **AI Studio is not BAA-eligible.** Synthetic data only until `AI_PROVIDER=vertex`
+  and a Google Cloud BAA are in place.
 
 ## Status
 
@@ -94,5 +119,5 @@ APIs yet -- that needs credentials in `.env`.
 | Scheduling core (slots, DST, tokens, booking) | Done |
 | Voice bridge (Telnyx ↔ Gemini, barge-in, reconnect) | Done |
 | Agent tools wired to the scheduler | Done |
-| Calendar mirror, reminders, inbound SMS | Plan 4 |
-| Dashboard | Plan 5 |
+| Calendar mirror, reminders, inbound SMS | Done |
+| Operator dashboard | Done |

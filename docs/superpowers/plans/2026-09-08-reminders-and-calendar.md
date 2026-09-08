@@ -145,14 +145,26 @@ appointment still visible on a provider's phone is worse than no entry at all.
 
 ---
 
-## Definition of done
+## Definition of done -- COMPLETE
 
-- [ ] A reminder sends exactly once, provably, under concurrency
-- [ ] `STOP` is honoured before every send and both promised replies work
-- [ ] Dry-run mode records real message bodies for review
-- [ ] Calendar failures never affect bookings
-- [ ] No reminder or calendar entry discloses a reason for visit
-- [ ] Full suite green, lint clean, no credentials needed for any test
+- [x] A reminder sends exactly once, proven under concurrency across 15 runs
+- [x] `STOP` honoured before every send; both `STOP` and `C` work, and the
+      `CANCEL` keyword collision is handled explicitly
+- [x] Dry-run records real message bodies, viewable on the dashboard
+- [x] Calendar failures never affect bookings -- guarded twice, and a test proved
+      the second guard was necessary
+- [x] No reminder discloses a reason for visit (asserted); the calendar carries the
+      appointment type because it is an internal staff view
+- [x] Full suite green (**322 tests**), lint clean, no credentials needed
+
+**Delivered beyond the plan:**
+- Migrations now apply in filename order via `db/migrate.py`
+- SMS segment counting fixed a real bug: UCS-2 counts UTF-16 code units, so a
+  non-BMP emoji is a surrogate pair. Counting Python characters understated the bill
+- A missing sender number falls back to dry-run rather than dropping reminders
+- Failed reminders are retried, with an attempt counter
+- Calls are persisted with transcripts; the `calls` table had existed since
+  migration 001 with nothing writing to it
 
 ## Deferred
 
