@@ -273,12 +273,24 @@ Expected: two overlapping inserts → second fails with `conflicting key value v
 
 ---
 
-## Definition of done
+## Definition of done -- COMPLETE
 
-- [ ] `.venv/bin/pytest -q` fully green
-- [ ] DST tested in both directions
-- [ ] Concurrent double-booking proven impossible against real Postgres
-- [ ] No placeholder code, no `TODO`
+- [x] `.venv/bin/pytest -q` fully green -- **64 tests**
+- [x] DST tested in both directions -- 4 tests, incl. windows crossing 02:00
+- [x] Concurrent double-booking proven impossible against real Postgres --
+      550/550 races correct after fixing a deadlock the first pass missed
+- [x] No placeholder code, no `TODO`
+- [x] Lint clean (`ruff check src tests scripts`)
+
+**Delivered beyond the plan:**
+- The exclusion constraint covers each appointment's *buffered* footprint, so
+  Postgres rejects bookings landing in a turnaround buffer, not just hard overlaps
+- Per-provider `pg_advisory_xact_lock` closing the exclusion-constraint deadlock
+  window (spec 5.1) -- found by stress testing, not by reasoning
+- `scheduling/service.py`: the API the voice agent will call, returning slots
+  already paired with signed tokens and spoken-time formatting
+- `db/seed.py`: idempotent config -> database sync
+- `scripts/stress_booking_race.py`: the tool that caught the deadlock, kept
 
 ## Next plans
 

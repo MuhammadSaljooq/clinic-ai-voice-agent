@@ -12,11 +12,11 @@ mid-sentence.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import asyncpg
 
-from clinic_agent.scheduling.models import Busy
+from clinic_agent.scheduling.models import AvailabilityException, Busy
 from clinic_agent.scheduling.tokens import verify_slot_token
 
 # Namespace for pg_advisory_xact_lock so our keys cannot collide with any other
@@ -314,6 +314,40 @@ async def load_busy(
             end=r["ends_at"].astimezone(UTC),
             buffer_before_min=r["buffer_before_min"],
             buffer_after_min=r["buffer_after_min"],
+        )
+        for r in rows
+    ]
+
+
+async def load_exceptions(
+    pool: asyncpg.Pool,
+    *,
+    provider_ids: list[int],
+    from_date: date,
+    to_date: date,
+) -> list[AvailabilityException]:
+    """Dated availability overrides (closures, half-days) for a window.
+
+    Recurring weekly hours come from config.yaml; only *exceptions* are runtime
+    data, because that is what staff add day to day.
+    """
+    rows = await pool.fetch(
+        """
+        SELECT provider_id, on_date, is_closed, start_time, end_time
+        FROM availability_exceptions
+        WHERE provider_id = ANY($1::int[]) AND on_date BETWEEN $2 AND $3
+        """,
+        provider_ids,
+        from_date,
+        to_date,
+    )
+    return [
+        AvailabilityException(
+            provider_id=r["provider_id"],
+            on_date=r["on_date"],
+            is_closed=r["is_closed"],
+            start=r["start_time"],
+            end=r["end_time"],
         )
         for r in rows
     ]

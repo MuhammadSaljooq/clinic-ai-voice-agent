@@ -4,7 +4,10 @@ distribution of outcomes and every unexpected exception type.
 Bisection logic: if this shows 0 anomalies over hundreds of races, the flake is
 NOT in the booking code -- it is in the pytest fixture.
 """
-import asyncio, collections, pathlib, sys
+import asyncio
+import collections
+import pathlib
+import sys
 from datetime import UTC, datetime, timedelta
 
 import asyncpg

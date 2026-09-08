@@ -1,0 +1,60 @@
+# Clinic configuration. Everything business-specific lives here.
+#
+# Appointment types and durations below are ILLUSTRATIVE -- replace them with the
+# real ones for your clinic. Nothing in the code depends on these exact values.
+
+clinic:
+  name: "Northside Family Clinic"
+  timezone: "America/New_York"
+  human_transfer_number: "+15551234567"
+  phone_display: "(555) 123-4567"
+
+slot_policy:
+  granularity_min: 15
+  min_lead_time_min: 120      # no bookings inside the next 2 hours
+  booking_horizon_days: 60    # no bookings more than 2 months out
+
+providers:
+  - id: 1
+    name: "Dr. Reyes"
+    availability:
+      - {weekday: mon, start: "09:00", end: "17:00"}
+      - {weekday: tue, start: "09:00", end: "17:00"}
+      - {weekday: wed, start: "09:00", end: "13:00"}
+      - {weekday: thu, start: "09:00", end: "17:00"}
+      - {weekday: fri, start: "09:00", end: "15:00"}
+  - id: 2
+    name: "Dr. Osei"
+    availability:
+      - {weekday: mon, start: "12:00", end: "20:00"}
+      - {weekday: wed, start: "12:00", end: "20:00"}
+      - {weekday: fri, start: "09:00", end: "17:00"}
+
+appointment_types:
+  - id: 1
+    name: "Follow-up"
+    duration_min: 15
+    buffer_after_min: 5
+    description: "Short check-in for an existing patient"
+    providers: [1, 2]
+  - id: 2
+    name: "New patient"
+    duration_min: 45
+    buffer_after_min: 10
+    description: "First visit, includes intake"
+    providers: [1, 2]
+  - id: 3
+    name: "Procedure"
+    duration_min: 60
+    buffer_before_min: 10
+    buffer_after_min: 15
+    description: "Requires room prep and turnaround"
+    providers: [1]
+
+faq:
+  - q: "Where are you located?"
+    a: "We're at 400 Northside Avenue, second floor. There's free parking behind the building."
+  - q: "What should I bring to a first appointment?"
+    a: "Photo ID, your insurance card, and a list of any medications you're taking."
+  - q: "What are your hours?"
+    a: "We're open Monday to Friday. Hours vary by provider, so I can check what's available if you'd like."
