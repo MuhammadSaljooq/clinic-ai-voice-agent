@@ -194,11 +194,18 @@ def test_limit_truncates_results():
 
 def test_naive_busy_datetime_is_rejected():
     """Silently mixing naive and aware datetimes is how timezone bugs get shipped."""
-    busy = [Busy(provider_id=1, start=datetime(2026, 9, 14, 15), end=datetime(2026, 9, 14, 16))]
+
+    busy = [
+        Busy(
+            provider_id=1,
+            start=datetime(2026, 9, 14, 15),  # noqa: DTZ001
+            end=datetime(2026, 9, 14, 16),  # noqa: DTZ001
+        )
+    ]
     with pytest.raises(ValueError, match="tz-aware"):
         call(busy=busy)
 
 
 def test_naive_now_is_rejected():
     with pytest.raises(ValueError, match="tz-aware"):
-        call(now=datetime(2026, 9, 14, 8))
+        call(now=datetime(2026, 9, 14, 8))  # noqa: DTZ001

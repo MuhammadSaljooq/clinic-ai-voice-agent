@@ -241,7 +241,31 @@ reminders (
 )
 ```
 
-Two constraints carry real weight:
+### 5.1 Writes are serialized per provider (learned the hard way)
+
+Every appointment write takes `pg_advisory_xact_lock(19731, provider_id)` as the
+**first** statement in its transaction.
+
+The exclusion constraint alone is not enough. Concurrent `INSERT`s of overlapping
+ranges each write a *speculative* entry into the GiST index and then scan for
+conflicts. Interleave two of them and each waits on the other's transaction id, so
+Postgres kills one with `DeadlockDetectedError` after `deadlock_timeout` (1s)
+instead of raising a clean `ExclusionViolationError`. The caller hears a crash
+rather than "that slot just went", and waits a second to hear it.
+
+This was not theoretical. Measured on this schema: **188 deadlocks across 550
+races**, and it made the two-caller test fail roughly 1 run in 10. With the
+advisory lock: **550/550 races correct, zero deadlocks.**
+
+The lock also gives every write transaction one consistent lock order (provider →
+patient row → index), and only contends between writes for the *same* provider,
+which for a clinic is a handful of events per minute.
+
+`DeadlockDetectedError` is still mapped to `SlotTaken` as defense in depth, so a
+future write path that forgets the lock degrades gracefully instead of surfacing a
+driver error mid-call.
+
+### 5.2 Constraints that carry real weight
 
 - The **GiST exclusion constraint** on `appointments` means a double-booking is
   rejected by the database itself, even under concurrent calls. This is stronger
@@ -439,6 +463,7 @@ fastest way to improve call quality.
 | Caller presses `0` | Immediate transfer (DTMF handled independently of the model) |
 | Telnyx stream never starts | Fall back to Telnyx TTS message + transfer |
 | Double-book attempt | Exclusion constraint rejects; model offers the next slot |
+| Concurrent booking race | Serialized by per-provider advisory lock (§5.1); loser gets a clean `SlotTaken` |
 | Reminder send fails | Row stays `pending`; retried with backoff, never duplicated |
 
 ---
