@@ -18,6 +18,7 @@ from clinic_agent.scheduling.booking import (
     SlotTaken,
     book,
     cancel,
+    find_upcoming_appointments,
     load_busy,
     reschedule,
 )
@@ -272,3 +273,54 @@ async def test_many_concurrent_bookings_never_produce_unexpected_errors(clinic):
         winners = [r for r in results if isinstance(r, Booked)]
         assert not unexpected, f"round {round_index}: {unexpected!r}"
         assert len(winners) == 1, f"round {round_index}: {len(winners)} winners"
+
+
+# --- looking up a caller's existing appointments -------------------------------
+
+
+async def test_lookup_finds_a_booked_appointment_by_phone(clinic):
+    booked = await book_at(clinic, AT_3PM, patient_phone="+15550123")
+    found = await find_upcoming_appointments(clinic, phone="+15550123", now=NOW)
+
+    assert len(found) == 1
+    assert found[0].appointment_id == booked.appointment_id
+    assert found[0].provider_name == "Dr. Reyes"
+    assert found[0].appointment_type_name == "Follow-up"
+
+
+async def test_lookup_ignores_cancelled_appointments(clinic):
+    booked = await book_at(clinic, AT_3PM, patient_phone="+15550123")
+    await cancel(clinic, booked.appointment_id)
+    assert await find_upcoming_appointments(clinic, phone="+15550123", now=NOW) == []
+
+
+async def test_lookup_ignores_appointments_already_in_the_past(clinic):
+    """Offering to reschedule yesterday's appointment would be nonsense."""
+    await book_at(clinic, AT_3PM, patient_phone="+15550123")
+    later = AT_3PM + timedelta(days=1)
+    assert await find_upcoming_appointments(clinic, phone="+15550123", now=later) == []
+
+
+async def test_lookup_matches_a_name_case_insensitively(clinic):
+    await book_at(clinic, AT_3PM, patient_name="Ada Lovelace", patient_phone="+15550123")
+    found = await find_upcoming_appointments(clinic, name="ada lovelace", now=NOW)
+    assert len(found) == 1
+
+
+async def test_lookup_returns_the_soonest_appointment_first(clinic):
+    later = await book_at(clinic, AT_3PM + timedelta(hours=3), patient_phone="+15550123")
+    sooner = await book_at(clinic, AT_3PM, patient_phone="+15550123")
+
+    found = await find_upcoming_appointments(clinic, phone="+15550123", now=NOW)
+    assert [a.appointment_id for a in found] == [sooner.appointment_id, later.appointment_id]
+
+
+async def test_lookup_does_not_return_other_patients_appointments(clinic):
+    await book_at(clinic, AT_3PM, patient_phone="+15550111")
+    assert await find_upcoming_appointments(clinic, phone="+15550999", now=NOW) == []
+
+
+async def test_lookup_without_phone_or_name_is_refused(clinic):
+    """Returning every patient's appointments would be a privacy failure."""
+    with pytest.raises(ValueError, match="requires phone or name"):
+        await find_upcoming_appointments(clinic, now=NOW)

@@ -8,7 +8,7 @@ signed slot tokens, so a slot the agent offers is the only thing it can book.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import asyncpg
 
@@ -23,6 +23,18 @@ from clinic_agent.scheduling.slots import find_slots
 from clinic_agent.scheduling.tokens import issue_slot_token
 
 DEFAULT_SEARCH_DAYS = 14
+
+# Fixed and explicit so tests are unambiguous and the agent's promises match reality.
+PART_OF_DAY_HOURS: dict[str, tuple[int, int]] = {
+    "morning": (0, 12),
+    "afternoon": (12, 17),
+    "evening": (17, 24),
+}
+
+# find_slots is asked for more than we will offer, because preference filtering happens
+# afterwards -- filtering a list that was already truncated to three would silently
+# return nothing whenever the first three slots fell outside the requested window.
+_PREFILTER_LIMIT = 500
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,11 +67,18 @@ async def available_slots(
     *,
     appointment_type_id: int,
     provider_id: int | None = None,
+    earliest_date: date | None = None,
+    part_of_day: str | None = None,
     search_days: int = DEFAULT_SEARCH_DAYS,
     now: datetime | None = None,
     limit: int = 3,
 ) -> list[OfferedSlot]:
     now = now or datetime.now(UTC)
+
+    if part_of_day is not None and part_of_day not in PART_OF_DAY_HOURS:
+        raise ValueError(
+            f"unknown part_of_day {part_of_day!r}; expected one of {sorted(PART_OF_DAY_HOURS)}"
+        )
 
     appointment_type = cfg.domain_appointment_type(appointment_type_id)
     providers = cfg.providers_for_type(appointment_type_id)
@@ -73,14 +92,17 @@ async def available_slots(
 
     provider_ids = [p.id for p in providers]
     # Search in clinic-local dates: patients think in local days, not UTC days.
-    search_from = now.astimezone(cfg.tz).date()
+    today = now.astimezone(cfg.tz).date()
+    # A caller asking for a date in the past means they misspoke or the model
+    # miscalculated; clamp rather than return an empty list they cannot act on.
+    search_from = max(earliest_date, today) if earliest_date else today
     search_to = search_from + timedelta(days=search_days)
 
     busy = await load_busy(
         pool,
         provider_ids=provider_ids,
         window_start=now - timedelta(days=1),
-        window_end=now + timedelta(days=search_days + 1),
+        window_end=now + timedelta(days=search_days + 2 + (search_from - today).days),
     )
     exceptions = await load_exceptions(
         pool, provider_ids=provider_ids, from_date=search_from, to_date=search_to
@@ -97,8 +119,16 @@ async def available_slots(
         now=now,
         search_from=search_from,
         search_to=search_to,
-        limit=limit,
+        limit=_PREFILTER_LIMIT,
     )
+
+    if part_of_day is not None:
+        start_hour, end_hour = PART_OF_DAY_HOURS[part_of_day]
+        slots = [
+            s for s in slots if start_hour <= s.start.astimezone(cfg.tz).hour < end_hour
+        ]
+
+    slots = slots[:limit]
 
     names = {p.id: p.name for p in providers}
     return [

@@ -204,3 +204,38 @@ def test_vertex_without_a_project_is_rejected_at_construction():
     import pytest
     with pytest.raises(ValueError, match="project"):
         client_kwargs(ProviderSettings(kind="vertex", location="us-central1"))
+
+
+# --- the model must know what day it is ---------------------------------------
+
+def test_instruction_states_the_current_clinic_local_date():
+    """Without this, 'tomorrow' and 'next Tuesday' are unanswerable."""
+    from datetime import UTC, datetime
+
+    moment = datetime(2026, 9, 14, 13, 30, tzinfo=UTC)  # 09:30 in New York
+    text = build_system_instruction(CFG, now=moment)
+
+    assert "Monday" in text
+    assert "14 September 2026" in text
+    assert "9:30 AM" in text
+    assert CFG.clinic.timezone in text
+
+
+def test_instruction_tells_the_model_to_derive_dates_rather_than_guess():
+    text = build_system_instruction(CFG).lower()
+    assert "never guess at a date" in text
+
+
+def test_find_slots_takes_structured_date_hints_not_free_text():
+    """Free text would push date parsing into our code, where it does not belong."""
+    declarations = {d.name: d for t in build_tools(CFG) for d in t.function_declarations}
+    properties = declarations["find_slots"].parameters.properties
+    assert "earliest_date" in properties
+    assert "part_of_day" in properties
+    assert "date_preference" not in properties
+
+
+def test_part_of_day_is_constrained_to_known_values():
+    declarations = {d.name: d for t in build_tools(CFG) for d in t.function_declarations}
+    enum = declarations["find_slots"].parameters.properties["part_of_day"].enum
+    assert set(enum) == {"morning", "afternoon", "evening"}

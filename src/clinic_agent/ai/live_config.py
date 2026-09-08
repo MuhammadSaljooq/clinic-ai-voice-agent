@@ -6,6 +6,8 @@ prompt and every tool contract are unit-testable.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from google.genai import types
 
 from clinic_agent.config import ClinicConfig
@@ -43,8 +45,10 @@ WRITE_TOOLS = (
     "transfer_to_human",
 )
 
+PARTS_OF_DAY = ("morning", "afternoon", "evening")
 
-def build_system_instruction(cfg: ClinicConfig) -> str:
+
+def build_system_instruction(cfg: ClinicConfig, *, now: datetime | None = None) -> str:
     provider_lines = []
     for provider in cfg.providers:
         hours = ", ".join(
@@ -60,7 +64,25 @@ def build_system_instruction(cfg: ClinicConfig) -> str:
 
     faq_lines = [f"  Q: {entry.q}\n  A: {entry.a}" for entry in cfg.faq]
 
+    # Without this the model cannot resolve "tomorrow" or "next Tuesday", which makes a
+    # scheduling agent useless. Stated in clinic-local time, since that is how the
+    # caller and the clinic both think about it.
+    local_now = (now or datetime.now(UTC)).astimezone(cfg.tz)
+    # Formatted by hand rather than with %-d / %-I: those are GNU/BSD strftime
+    # extensions and emit literal "-d" on musl (Alpine), a plausible deploy target.
+    today_line = (
+        f"{local_now:%A}, {local_now.day} {local_now:%B} {local_now.year}, "
+        f"{local_now.hour % 12 or 12}:{local_now.minute:02d} "
+        f"{'AM' if local_now.hour < 12 else 'PM'}"
+    )
+
     return f"""You are the phone assistant for {cfg.clinic.name}.
+
+RIGHT NOW IT IS
+{today_line} ({cfg.clinic.timezone}).
+Use this to work out what the caller means by "today", "tomorrow", "next week" or a
+named day, and pass a concrete date to find_slots. Never guess at a date without
+working it out from the current date above.
 
 HOW TO OPEN THE CALL
 Your first sentence must greet the caller and state plainly that you are an AI
@@ -156,9 +178,14 @@ def build_tools(cfg: ClinicConfig) -> list[types.Tool]:
                     "provider_name": _string(
                         "Preferred provider, if the caller named one.", enum=provider_names
                     ),
-                    "date_preference": _string(
-                        "What the caller said about timing, in their own words, e.g. "
-                        "'next Tuesday morning' or 'as soon as possible'."
+                    "earliest_date": _string(
+                        "The earliest date the caller would accept, as YYYY-MM-DD, "
+                        "worked out from the current date given above. Omit if they "
+                        "just want the soonest available."
+                    ),
+                    "part_of_day": _string(
+                        "Restrict to a part of the day if the caller asked for one.",
+                        enum=list(PARTS_OF_DAY),
                     ),
                 },
                 required=["appointment_type"],
@@ -266,13 +293,14 @@ def build_tools(cfg: ClinicConfig) -> list[types.Tool]:
 def build_live_config(
     cfg: ClinicConfig,
     *,
+    now: datetime | None = None,
     resumption_handle: str | None = None,
     voice: str = DEFAULT_VOICE,
     enable_affective_dialog: bool = True,
 ) -> types.LiveConnectConfig:
     return types.LiveConnectConfig(
         response_modalities=[types.Modality.AUDIO],
-        system_instruction=build_system_instruction(cfg),
+        system_instruction=build_system_instruction(cfg, now=now),
         tools=build_tools(cfg),
         enable_affective_dialog=enable_affective_dialog,
         speech_config=types.SpeechConfig(

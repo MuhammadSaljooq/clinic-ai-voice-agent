@@ -351,3 +351,72 @@ async def load_exceptions(
         )
         for r in rows
     ]
+
+
+@dataclass(frozen=True, slots=True)
+class UpcomingAppointment:
+    appointment_id: int
+    provider_id: int
+    provider_name: str
+    appointment_type_id: int
+    appointment_type_name: str
+    patient_name: str
+    starts_at: datetime
+    ends_at: datetime
+
+
+async def find_upcoming_appointments(
+    pool: asyncpg.Pool,
+    *,
+    phone: str | None = None,
+    name: str | None = None,
+    now: datetime | None = None,
+    limit: int = 5,
+) -> list[UpcomingAppointment]:
+    """Booked, still-future appointments for a caller, soonest first.
+
+    Caller ID is the usual way in, which is why phone is matched exactly and name only
+    as a fallback -- asking someone to spell their name to a phone robot is exactly the
+    experience this project is trying to avoid.
+    """
+    if not phone and not name:
+        raise ValueError("find_upcoming_appointments requires phone or name")
+
+    now = now or datetime.now(UTC)
+
+    rows = await pool.fetch(
+        """
+        SELECT a.id, a.provider_id, p.name AS provider_name,
+               a.appointment_type_id, t.name AS type_name,
+               pt.name AS patient_name, a.starts_at, a.ends_at
+        FROM appointments a
+        JOIN providers p ON p.id = a.provider_id
+        JOIN appointment_types t ON t.id = a.appointment_type_id
+        JOIN patients pt ON pt.id = a.patient_id
+        WHERE a.status = 'booked'
+          AND a.starts_at >= $3
+          AND (
+                ($1::text IS NOT NULL AND pt.phone = $1)
+             OR ($2::text IS NOT NULL AND lower(pt.name) = lower($2))
+          )
+        ORDER BY a.starts_at
+        LIMIT $4
+        """,
+        phone,
+        name,
+        now,
+        limit,
+    )
+    return [
+        UpcomingAppointment(
+            appointment_id=r["id"],
+            provider_id=r["provider_id"],
+            provider_name=r["provider_name"],
+            appointment_type_id=r["appointment_type_id"],
+            appointment_type_name=r["type_name"],
+            patient_name=r["patient_name"],
+            starts_at=r["starts_at"].astimezone(UTC),
+            ends_at=r["ends_at"].astimezone(UTC),
+        )
+        for r in rows
+    ]
