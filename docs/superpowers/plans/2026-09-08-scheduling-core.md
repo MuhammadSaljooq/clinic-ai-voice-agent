@@ -192,9 +192,22 @@ Expected: all pass
 
 Endpoint-conversion means DST is handled by construction; these tests prove it and guard the regression.
 
-- [ ] **Step 1:** Spring forward (2026-03-08, America/New_York): a 09:00–17:00 local day spans **7 real hours**, so a 60-min type yields 7 slots, not 8.
-- [ ] **Step 2:** Fall back (2026-11-01): the same local day spans **9 real hours** → 9 slots.
-- [ ] **Step 3:** Slot local wall-clock times still read 09:00, 10:00, … on both days.
+**Correction to an earlier draft of this plan:** it claimed a 09:00-17:00 day
+spans 7 real hours on spring-forward. That is wrong. Both US transitions occur at
+**02:00 on a Sunday**, which is outside ordinary clinic hours, so a 9-5 day is
+still 8 hours. The real DST risks are different, and these are the tests:
+
+- [ ] **Step 1:** The same local 09:00 maps to a **different UTC instant** either
+      side of the transition (14:00 UTC under EST, 13:00 UTC under EDT). An
+      implementation that converted once and added 24h per day would be an hour
+      wrong for eight months of the year.
+- [ ] **Step 2:** An ordinary 09:00-17:00 day yields **8 slots on both days** --
+      the transition does not touch it.
+- [ ] **Step 3:** A window that *does* cross 02:00 loses an hour on spring-forward:
+      01:00-05:00 local is **3 real hours**, and wall times step 01:00 -> 03:00
+      because 02:00 never happens.
+- [ ] **Step 4:** The same window gains an hour on fall-back: 01:00-03:00 local is
+      **3 real hours**, and 01:00 appears twice as two distinct, bookable instants.
 - [ ] **Step 4:** Run `.venv/bin/pytest tests/test_slots_dst.py -q`; commit.
 
 ---
