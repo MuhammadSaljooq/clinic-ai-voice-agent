@@ -19,6 +19,7 @@ dependencies = [
     "google-auth>=2.35",
     "pynacl>=1.5",
     "tzdata>=2024.2",
+    "python-dotenv>=1.2.3",
 ]
 
 [project.optional-dependencies]

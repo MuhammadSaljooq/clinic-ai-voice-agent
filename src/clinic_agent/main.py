@@ -12,6 +12,7 @@ import pathlib
 
 import asyncpg
 import uvicorn
+from dotenv import load_dotenv
 
 from clinic_agent.agent.tools import ToolRouter
 from clinic_agent.ai.live_session import build_gemini_connector
@@ -27,6 +28,9 @@ MIGRATION = pathlib.Path(__file__).parent / "db" / "migrations" / "001_init.sql"
 
 
 def build_app():
+    # Read .env so secrets stay in a gitignored file rather than the shell history.
+    load_dotenv()
+
     cfg = load_config(os.environ.get("CLINIC_CONFIG", "config.yaml"))
     settings = settings_from_env()
 
