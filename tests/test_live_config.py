@@ -239,3 +239,10 @@ def test_part_of_day_is_constrained_to_known_values():
     declarations = {d.name: d for t in build_tools(CFG) for d in t.function_declarations}
     enum = declarations["find_slots"].parameters.properties["part_of_day"].enum
     assert set(enum) == {"morning", "afternoon", "evening"}
+
+
+def test_thinking_is_disabled_to_keep_replies_fast():
+    """Measured: leaving thinking on added ~6s before the caller heard anything."""
+    cfg = build_live_config(CFG)
+    assert cfg.thinking_config is not None
+    assert cfg.thinking_config.thinking_budget == 0

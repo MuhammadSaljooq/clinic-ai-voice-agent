@@ -30,6 +30,12 @@ COMPRESSION_TARGET_TOKENS = 8_000
 END_OF_SPEECH_SILENCE_MS = 600
 PREFIX_PADDING_MS = 120
 
+# Thinking is off. Measured on a real session, leaving it on put roughly six seconds
+# between the caller finishing a sentence and hearing anything back -- the single
+# largest contributor to sounding like a machine. Scheduling a clinic appointment needs
+# no chain of reasoning; the tools do the actual work.
+THINKING_BUDGET = 0
+
 # Reads are NON_BLOCKING so the line never goes silent while we look something up.
 READ_TOOLS = ("find_slots", "lookup_appointment", "answer_faq")
 
@@ -306,6 +312,7 @@ def build_live_config(
         system_instruction=build_system_instruction(cfg, now=now),
         tools=build_tools(cfg),
         enable_affective_dialog=enable_affective_dialog,
+        thinking_config=types.ThinkingConfig(thinking_budget=THINKING_BUDGET),
         speech_config=types.SpeechConfig(
             voice_config=types.VoiceConfig(
                 prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice)

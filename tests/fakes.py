@@ -102,17 +102,36 @@ def telnyx_dtmf(digit: str) -> str:
 
 
 class FakeGeminiSession:
-    def __init__(self, messages: list[types.LiveServerMessage] | None = None):
+    """Scriptable Live session.
+
+    `turns` models the real SDK: each call to receive() yields one turn's messages and
+    then completes. `messages` is shorthand for a single turn.
+    """
+
+    def __init__(
+        self,
+        messages: list[types.LiveServerMessage] | None = None,
+        *,
+        turns: list[list[types.LiveServerMessage]] | None = None,
+    ):
+        self.turns = [list(t) for t in turns] if turns is not None else (
+            [list(messages)] if messages else []
+        )
+        self.receive_calls = 0
         self.messages = list(messages or [])
         self.audio_in: list[types.Blob] = []
         self.tool_responses: list[types.FunctionResponse] = []
         self.text_in: list[str] = []
+        self.client_content: list[object] = []
 
     async def send_realtime_input(self, *, audio=None, text=None, **_kw) -> None:
         if audio is not None:
             self.audio_in.append(audio)
         if text is not None:
             self.text_in.append(text)
+
+    async def send_client_content(self, *, turns=None, turn_complete: bool = True) -> None:
+        self.client_content.append(turns)
 
     async def send_tool_response(self, *, function_responses) -> None:
         if isinstance(function_responses, list | tuple):
@@ -121,7 +140,12 @@ class FakeGeminiSession:
             self.tool_responses.append(function_responses)
 
     async def receive(self):
-        for message in self.messages:
+        """One turn per call, like the real SDK."""
+        index = self.receive_calls
+        self.receive_calls += 1
+        if index >= len(self.turns):
+            return
+        for message in self.turns[index]:
             yield message
             await asyncio.sleep(0)  # let other tasks run, as a real socket would
 

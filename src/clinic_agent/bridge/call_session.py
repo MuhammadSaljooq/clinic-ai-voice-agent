@@ -47,6 +47,17 @@ FRAME_SECONDS = 0.02
 GEMINI_INPUT_MIME = "audio/pcm;rate=16000"
 TRANSFER_TOOL = "transfer_to_human"
 
+# Sent once when the first session opens. Without it the model waits for the caller to
+# speak, so a real caller hears silence after the line connects -- and the system
+# instruction's "greet first, disclose you are an AI" never happens.
+GREETING_NUDGE = (
+    "(The phone call has just connected and the caller is listening. "
+    "Greet them now, in one short sentence, and state that you are an AI assistant.)"
+)
+
+# How long to let the Gemini loop finish after the call ends before giving up on it.
+DRAIN_TIMEOUT_SECONDS = 10.0
+
 
 @dataclass(slots=True)
 class ToolContext:
@@ -79,12 +90,17 @@ class CallSession:
         tool_handler: ToolHandler | None = None,
         max_reconnects: int = 5,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        greet_on_connect: bool = True,
+        drain_timeout: float = DRAIN_TIMEOUT_SECONDS,
     ):
         self._telnyx = telnyx
         self._connect_gemini = connect_gemini
         self._tool_handler = tool_handler
         self._max_reconnects = max_reconnects
         self._sleep = sleep
+        self._greet_on_connect = greet_on_connect
+        self._drain_timeout = drain_timeout
+        self._greeted = False
 
         self._inbound: asyncio.Queue[bytes] = asyncio.Queue()
         self._outbound: asyncio.Queue[bytes] = asyncio.Queue()
@@ -98,6 +114,8 @@ class CallSession:
         self._saw_stop = False
         self._unsupported_codec = False
         self._hit_reconnect_limit = False
+        self._audio_in_frames = 0
+        self._audio_out_frames = 0
 
     # --- public ---------------------------------------------------------------
 
@@ -116,7 +134,17 @@ class CallSession:
                 # the session it is serving -- otherwise queued audio and any tool
                 # response still in flight are thrown away.
                 self._call_ended.set()
-                await gemini
+                try:
+                    # Bounded: session.receive() blocks until Gemini yields or closes,
+                    # and a session that does neither would hang the call forever.
+                    await asyncio.wait_for(asyncio.shield(gemini), timeout=self._drain_timeout)
+                except TimeoutError:
+                    log.warning(
+                        "Gemini loop did not finish within %.0fs of the call ending; cancelling",
+                        self._drain_timeout,
+                    )
+                    gemini.cancel()
+                    await asyncio.gather(gemini, return_exceptions=True)
             else:
                 # No Gemini session means there is no agent, so end the call.
                 reader.cancel()
@@ -242,8 +270,18 @@ class CallSession:
         while True:
             reconnect_requested = False
             try:
+                log.info(
+                    "opening Gemini session (handle=%s)",
+                    "resume" if self.resumption_handle else "new",
+                )
                 async with self._connect_gemini(self.resumption_handle) as session:
+                    log.info("Gemini session open")
                     reconnect_requested = await self._serve_session(session)
+                    log.info(
+                        "Gemini session closed (audio in=%d frames, out=%d frames)",
+                        self._audio_in_frames,
+                        self._audio_out_frames,
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -271,14 +309,47 @@ class CallSession:
         pump = asyncio.create_task(self._pump_inbound(session), name="gemini-inbound")
         go_away = False
         try:
-            async for message in session.receive():
-                if message.go_away is not None:
-                    # Google warns before resetting the socket, so we can reconnect
-                    # on our own terms rather than mid-sentence.
-                    log.info("Gemini go_away received; reconnecting")
-                    go_away = True
+            if self._greet_on_connect and not self._greeted:
+                self._greeted = True
+                log.info("prompting the agent to greet the caller")
+                await session.send_client_content(
+                    turns={"role": "user", "parts": [{"text": GREETING_NUDGE}]},
+                    turn_complete=True,
+                )
+
+            # `session.receive()` completes at each TURN boundary, not when the socket
+            # closes -- so it must be re-entered for every turn on the same session.
+            # Treating its completion as a dropped connection reconnects after the
+            # first turn and kills the conversation, which is exactly what it did.
+            empty_turns = 0
+            # do-while: always make one pass, even if the caller has already hung up,
+            # so audio and tool responses already in flight are still drained.
+            while True:
+                messages = 0
+                async for message in session.receive():
+                    messages += 1
+                    if message.go_away is not None:
+                        # Google warns before resetting the socket, so we can
+                        # reconnect on our own terms rather than mid-sentence.
+                        log.info("Gemini go_away received; reconnecting")
+                        go_away = True
+                        break
+                    await self._on_gemini_message(session, message)
+
+                if go_away or self._call_ended.is_set():
                     break
-                await self._on_gemini_message(session, message)
+
+                if messages:
+                    empty_turns = 0
+                    continue
+
+                # A genuinely closed socket yields nothing, repeatedly. Distinguish
+                # that from an idle turn boundary without spinning hot.
+                empty_turns += 1
+                if empty_turns >= 3:
+                    log.info("Gemini yielded nothing three times; treating as closed")
+                    break
+                await self._sleep(0.05)
         finally:
             if not go_away:
                 await self._drain_inbound(session)
@@ -314,6 +385,9 @@ class CallSession:
             await session.send_realtime_input(
                 audio=types.Blob(data=telnyx_to_gemini(audio), mime_type=GEMINI_INPUT_MIME)
             )
+            self._audio_in_frames += 1
+            if self._audio_in_frames == 1:
+                log.info("first caller audio forwarded to Gemini")
 
     async def _on_gemini_message(self, session: Any, message: types.LiveServerMessage) -> None:
         if message.session_resumption_update is not None:
@@ -337,6 +411,9 @@ class CallSession:
                     if blob is not None and blob.data:
                         for frame in frame_20ms(gemini_to_telnyx(blob.data)):
                             self._outbound.put_nowait(frame)
+                            self._audio_out_frames += 1
+                        if self._audio_out_frames and self._audio_in_frames >= 0:
+                            log.debug("queued agent audio (%d frames total)", self._audio_out_frames)
 
         if message.tool_call is not None:
             for call in message.tool_call.function_calls or []:

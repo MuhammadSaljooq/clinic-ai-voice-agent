@@ -111,11 +111,16 @@ def create_app(deps: AppDeps, *, lifespan: Any | None = None) -> FastAPI:
             raise
         else:
             log.info(
-                "call %s ended (%s) after %d reconnect(s)",
+                "call %s ended (%s) after %d reconnect(s), %d transcript line(s)",
                 outcome.call_control_id,
                 outcome.ended_reason,
                 outcome.reconnects,
+                len(outcome.transcript),
             )
+            # The transcript is the fastest way to see what actually happened on a
+            # call, so it goes in the log rather than only into the outcome object.
+            for entry in outcome.transcript:
+                log.info("  %-6s %s", entry["role"], entry["text"])
             if deps.on_call_finished is not None:
                 await deps.on_call_finished(outcome)
 

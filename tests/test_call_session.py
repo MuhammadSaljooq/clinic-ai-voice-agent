@@ -308,3 +308,65 @@ async def test_an_unexpected_codec_is_refused_rather_than_played_as_noise(encodi
         [json.dumps(start)], [FakeGeminiSession()]
     )
     assert outcome.ended_reason == "unsupported_codec"
+
+
+# --- greeting ------------------------------------------------------------------
+
+
+async def test_the_agent_is_prompted_to_greet_when_the_call_connects():
+    """Without this the model waits for the caller, so a real caller hears silence
+    and the legally required AI disclosure never gets spoken."""
+    gemini = FakeGeminiSession()
+    await run_session([telnyx_start(), telnyx_stop()], [gemini])
+
+    assert len(gemini.client_content) == 1
+    nudge = str(gemini.client_content[0])
+    assert "greet" in nudge.lower()
+    assert "ai" in nudge.lower()
+
+
+async def test_the_greeting_is_not_repeated_after_a_reconnect():
+    """Re-greeting mid-call would have the agent introduce itself twice."""
+    first = FakeGeminiSession([gemini_resumption("h1"), gemini_go_away()])
+    second = FakeGeminiSession()
+
+    await run_session([telnyx_start()], [first, second], max_reconnects=1)
+
+    assert len(first.client_content) == 1
+    assert second.client_content == [], "should not greet again on the resumed session"
+
+
+async def test_greeting_can_be_disabled():
+    socket = FakeTelnyxSocket([telnyx_start(), telnyx_stop()])
+    gemini = FakeGeminiSession()
+    session = CallSession(
+        telnyx=socket,
+        connect_gemini=FakeConnector(gemini),
+        tool_handler=None,
+        max_reconnects=0,
+        sleep=noop_sleep,
+        greet_on_connect=False,
+    )
+    await session.run()
+    assert gemini.client_content == []
+
+
+async def test_a_turn_boundary_is_not_mistaken_for_a_dropped_session():
+    """Regression: session.receive() completes at each TURN, not on socket close.
+
+    The first implementation treated its completion as a dropped connection and
+    reconnected, so every conversation died after one turn. Verified against the real
+    API: calling receive() again on the same session returns the next turn's audio.
+    """
+    gemini = FakeGeminiSession(turns=[
+        [gemini_audio(gemini_pcm(40))],   # turn 1
+        [gemini_audio(gemini_pcm(40))],   # turn 2, same session
+    ])
+    socket, connector, _, _, _ = await run_session(
+        [telnyx_start()], [gemini], max_reconnects=0
+    )
+
+    assert connector.handles == [None], "must not reconnect between turns"
+    assert gemini.receive_calls >= 2, "receive() must be re-entered for the next turn"
+    # Both turns' audio reached Telnyx: 40ms at 24k -> 40ms at 16k -> 2 frames each.
+    assert len(socket.media_frames) == 4

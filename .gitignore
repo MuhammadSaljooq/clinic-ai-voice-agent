@@ -6,3 +6,5 @@ venv/
 *.json.key
 service-account*.json
 .DS_Store
+.tts-cache/
+agent_reply.wav
