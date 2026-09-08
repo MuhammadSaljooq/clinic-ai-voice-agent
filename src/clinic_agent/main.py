@@ -28,8 +28,10 @@ MIGRATION = pathlib.Path(__file__).parent / "db" / "migrations" / "001_init.sql"
 
 
 def build_app():
-    # Read .env so secrets stay in a gitignored file rather than the shell history.
-    load_dotenv()
+    # Read .env so secrets stay in a gitignored file rather than shell history.
+    # Explicit path: bare load_dotenv() searches from the caller's directory and
+    # silently loads nothing when the working directory differs.
+    load_dotenv(pathlib.Path(__file__).resolve().parents[2] / ".env")
 
     cfg = load_config(os.environ.get("CLINIC_CONFIG", "config.yaml"))
     settings = settings_from_env()
