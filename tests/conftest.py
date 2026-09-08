@@ -10,10 +10,11 @@ Requires: docker start clinic-pg
 from __future__ import annotations
 
 import os
-import pathlib
 
 import asyncpg
 import pytest
+
+from clinic_agent.db.migrate import apply_all
 
 ADMIN_DSN = os.environ.get(
     "ADMIN_DATABASE_URL", "postgresql://clinic:clinic@localhost:55432/postgres"
@@ -21,9 +22,7 @@ ADMIN_DSN = os.environ.get(
 TEST_DSN = os.environ.get(
     "TEST_DATABASE_URL", "postgresql://clinic:clinic@localhost:55432/clinic_test"
 )
-MIGRATION = (
-    pathlib.Path(__file__).resolve().parents[1] / "src/clinic_agent/db/migrations/001_init.sql"
-)
+
 
 
 @pytest.fixture
@@ -40,7 +39,7 @@ async def pool():
     p = await asyncpg.create_pool(TEST_DSN, min_size=2, max_size=10)
     async with p.acquire() as conn:
         await conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
-        await conn.execute(MIGRATION.read_text())
+    await apply_all(p)
     try:
         yield p
     finally:

@@ -19,12 +19,11 @@ from clinic_agent.ai.live_session import build_gemini_connector
 from clinic_agent.ai.provider import settings_from_env
 from clinic_agent.app import AppDeps, create_app
 from clinic_agent.config import load_config
+from clinic_agent.db.migrate import apply_all
 from clinic_agent.db.seed import seed_from_config
 from clinic_agent.telephony.telnyx_client import TelnyxClient
 
 log = logging.getLogger(__name__)
-
-MIGRATION = pathlib.Path(__file__).parent / "db" / "migrations" / "001_init.sql"
 
 
 def build_app():
@@ -60,9 +59,8 @@ def build_app():
     @contextlib.asynccontextmanager
     async def lifespan(_app):
         pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], min_size=2, max_size=10)
-        # The migration is idempotent, so applying it on boot keeps deploys simple.
-        async with pool.acquire() as conn:
-            await conn.execute(MIGRATION.read_text())
+        # Migrations are idempotent, so applying them on boot keeps deploys simple.
+        await apply_all(pool)
         await seed_from_config(pool, cfg)
 
         # One router serves every call: all per-call state lives on the ToolContext,
