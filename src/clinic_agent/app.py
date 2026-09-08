@@ -16,6 +16,7 @@ from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 
 from clinic_agent.bridge.call_session import CallSession, ToolHandler
 from clinic_agent.config import ClinicConfig
+from clinic_agent.messaging.inbound import handle_inbound
 from clinic_agent.telephony.signature import (
     SIGNATURE_HEADER,
     TIMESTAMP_HEADER,
@@ -36,6 +37,10 @@ class AppDeps:
     connect_gemini: Callable[[str | None], Any]
     tool_handler: ToolHandler | None = None
     on_call_finished: Callable[[Any], Any] | None = None
+    # Needed only by the messaging webhook; the voice path does not touch the DB
+    # directly, it goes through the tool handler.
+    pool: Any | None = None
+    sms_from_number: str | None = None
 
 
 class TelnyxWebSocketAdapter:
@@ -95,6 +100,56 @@ def create_app(deps: AppDeps, *, lifespan: Any | None = None) -> FastAPI:
 
         log.debug("ignoring Telnyx event %r", event)
         return Response(status_code=200, content="ignored")
+
+    @app.post("/telnyx/messaging")
+    async def telnyx_messaging(request: Request) -> Response:
+        """Inbound SMS: STOP, START, HELP, and C to cancel.
+
+        Opt-out is a legal requirement, so this endpoint has to work before any
+        reminder is ever sent.
+        """
+        body = await request.body()
+        try:
+            verify_webhook(
+                body=body,
+                signature_b64=request.headers.get(SIGNATURE_HEADER, ""),
+                timestamp=request.headers.get(TIMESTAMP_HEADER, ""),
+                public_key_b64=deps.public_key_b64,
+            )
+        except InvalidWebhookSignature as exc:
+            log.warning("rejected Telnyx messaging webhook: %s", exc)
+            return Response(status_code=401, content="invalid signature")
+
+        payload = await request.json()
+        data = payload.get("data") or {}
+        if data.get("event_type") != "message.received":
+            return Response(status_code=200, content="ignored")
+
+        # Checked after the event filter: ignoring an irrelevant event needs no database.
+        if deps.pool is None:
+            log.error("messaging webhook received but no database pool is configured")
+            return Response(status_code=200, content="not configured")
+
+        message = data.get("payload") or {}
+        sender = (message.get("from") or {}).get("phone_number") or ""
+        # Message text is written by whoever sent it: data, never instructions.
+        text = message.get("text") or ""
+
+        result = await handle_inbound(
+            deps.pool, deps.cfg, from_number=sender, text=text
+        )
+        log.info("inbound SMS handled: %s", result.action)
+
+        if result.reply and sender and deps.sms_from_number:
+            try:
+                await deps.telnyx.send_sms(
+                    to=sender, from_=deps.sms_from_number, text=result.reply
+                )
+            except Exception:
+                # The state change already happened and matters more than the reply.
+                log.exception("could not send the SMS reply")
+
+        return Response(status_code=200, content=result.action)
 
     @app.websocket("/telnyx/stream")
     async def telnyx_stream(websocket: WebSocket) -> None:

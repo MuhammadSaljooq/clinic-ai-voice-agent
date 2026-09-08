@@ -171,3 +171,34 @@ async def test_adapter_turns_a_disconnect_into_a_clean_end_of_iteration():
     """A hangup must read as end-of-stream, not as an exception mid-call."""
     adapter = TelnyxWebSocketAdapter(StubWebSocket([]))
     assert [frame async for frame in adapter] == []
+
+
+# --- inbound SMS webhook -------------------------------------------------------
+
+
+def test_an_unsigned_messaging_webhook_is_rejected():
+    """Without this, anyone could opt patients out or cancel their appointments."""
+    client, *_ = build()
+    body = json.dumps({"data": {"event_type": "message.received"}}).encode()
+    assert client.post("/telnyx/messaging", content=body).status_code == 401
+
+
+def test_a_signed_messaging_webhook_without_a_pool_does_not_crash():
+    client, key, *_ = build()
+    body = json.dumps({
+        "data": {
+            "event_type": "message.received",
+            "payload": {"from": {"phone_number": "+15550100"}, "text": "STOP"},
+        }
+    }).encode()
+    response = client.post("/telnyx/messaging", content=body, headers=signed_headers(key, body))
+    assert response.status_code == 200
+    assert response.text == "not configured"
+
+
+def test_non_message_events_are_acknowledged_and_ignored():
+    client, key, *_ = build()
+    body = json.dumps({"data": {"event_type": "message.sent", "payload": {}}}).encode()
+    response = client.post("/telnyx/messaging", content=body, headers=signed_headers(key, body))
+    assert response.status_code == 200
+    assert response.text == "ignored"

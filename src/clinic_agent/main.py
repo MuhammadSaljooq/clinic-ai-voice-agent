@@ -65,6 +65,8 @@ def build_app():
 
         # One router serves every call: all per-call state lives on the ToolContext,
         # so there is nothing call-specific to keep here.
+        deps.pool = pool
+        deps.sms_from_number = os.environ.get("TELNYX_NUMBER")
         deps.tool_handler = ToolRouter(
             pool=pool,
             cfg=cfg,
