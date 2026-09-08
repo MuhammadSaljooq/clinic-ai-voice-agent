@@ -80,9 +80,12 @@ Telnyx must be able to reach `PUBLIC_STREAM_URL` from the internet — it cannot
 dial your laptop. For local development, tunnel with ngrok and point
 `PUBLIC_STREAM_URL` at the tunnel.
 
-**Tool handlers are not wired to the scheduler yet (Plan 3).** The agent will
-answer, converse, and disclose that it is an AI, but any booking attempt returns a
-structured error and it will offer to transfer instead.
+The agent can now answer, disclose that it is an AI, find slots, book, reschedule,
+cancel, answer questions from `config.yaml`, and transfer to a human.
+
+Still to come: the Google Calendar mirror and SMS reminders (Plan 4) and the
+dashboard (Plan 5). Nothing has been verified against the real Telnyx or Gemini
+APIs yet -- that needs credentials in `.env`.
 
 ## Status
 
@@ -90,6 +93,6 @@ structured error and it will offer to transfer instead.
 |---|---|
 | Scheduling core (slots, DST, tokens, booking) | Done |
 | Voice bridge (Telnyx ↔ Gemini, barge-in, reconnect) | Done |
-| Agent tools wired to the scheduler | Plan 3 |
+| Agent tools wired to the scheduler | Done |
 | Calendar mirror, reminders, inbound SMS | Plan 4 |
 | Dashboard | Plan 5 |

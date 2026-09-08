@@ -57,8 +57,10 @@ class TelnyxWebSocketAdapter:
             raise StopAsyncIteration from exc
 
 
-def create_app(deps: AppDeps) -> FastAPI:
-    app = FastAPI(title="Clinic AI Voice Agent")
+def create_app(deps: AppDeps, *, lifespan: Any | None = None) -> FastAPI:
+    # `deps.tool_handler` is read when a call arrives, not when the app is built,
+    # so a lifespan can fill it in once the database pool exists.
+    app = FastAPI(title="Clinic AI Voice Agent", lifespan=lifespan)
 
     @app.get("/health")
     async def health() -> dict[str, str]:

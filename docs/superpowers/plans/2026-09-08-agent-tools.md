@@ -130,21 +130,42 @@ morning `< 12:00`, afternoon `12:00–16:59`, evening `>= 17:00`, all clinic-loc
 
 **Files:** Modify `src/clinic_agent/main.py`, `src/clinic_agent/app.py`
 
-- [ ] **Step 1:** Build a `ToolRouter` per call (it holds per-call state, so it must not
-      be shared between calls) and pass it as the bridge's `tool_handler`.
+- [ ] **Step 1:** Pass a `ToolRouter` as the bridge's `tool_handler`.
+
+**Revision to this plan:** it said to build a router *per call* because the router
+holds per-call state. It does not. All per-call state lives on the `ToolContext` the
+bridge already creates when a call starts, which makes `ToolRouter` stateless and
+safe to share across every concurrent call. That is strictly simpler, and it is what
+lets the end-to-end test prove state survives between two tool calls on one context.
 - [ ] **Step 2:** Remove the `not_wired_yet` placeholder.
 - [ ] **Step 3:** Add a DB pool to app startup, seeded from config.
 - [ ] **Step 4:** Full suite green, lint clean. Commit.
 
 ---
 
-## Definition of done
+## Definition of done -- COMPLETE
 
-- [ ] A caller can book, reschedule, cancel, and ask a question end to end in tests
-- [ ] The model knows today's date
-- [ ] Every known failure is a spoken-recoverable result, not an exception
-- [ ] Tokens never enter the model's context
-- [ ] Full suite green, lint clean
+- [x] A caller can book, reschedule, cancel, and ask a question end to end in tests,
+      including a scripted call that drives tool calls through the audio bridge into
+      Postgres
+- [x] The model knows today's date, in clinic-local time
+- [x] Every known failure is a spoken-recoverable result, not an exception
+- [x] Tokens never enter the model's context (asserted directly)
+- [x] Full suite green (**224 tests**), lint clean
+
+**Delivered beyond the plan:**
+- **Authorisation on reschedule and cancel.** Only appointment ids that
+  `lookup_appointment` returned *for this caller* can be changed. Without it a
+  hallucinated or guessed id could move or cancel a stranger's appointment. Two
+  tests act as the attacker.
+- **Name-only lookup removed from the tool schema.** Matching a spoken name alone
+  would hand out another patient's details; lookup is caller-ID-first.
+- **Offers are consumed on booking**, so one call cannot book the same slot twice.
+- **Preference filtering runs before the offer limit**, fixing a bug where asking for
+  the afternoon would return nothing whenever the first three slots were mornings.
+- **One spoken-time formatter.** The offer path and the read-back path had drifted --
+  "the 14th" versus "the 14", the latter spoken as "the fourteen". Now shared, with
+  ordinal tests covering 11th/12th/13th/21st/22nd.
 
 ## Deferred
 

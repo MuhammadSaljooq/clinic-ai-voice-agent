@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import asyncpg
 
@@ -47,17 +48,27 @@ class OfferedSlot:
 
     def spoken_time(self, cfg: ClinicConfig) -> str:
         """How the agent should say this slot out loud, in clinic-local time."""
-        local = self.slot.start.astimezone(cfg.tz)
-        minute = f":{local.minute:02d}" if local.minute else ""
-        hour = local.hour % 12 or 12
-        meridiem = "am" if local.hour < 12 else "pm"
-        return f"{local:%A} the {local.day}{_ordinal(local.day)} at {hour}{minute} {meridiem}"
+        return spoken_datetime(self.slot.start, cfg.tz)
 
 
 def _ordinal(day: int) -> str:
     if 11 <= day % 100 <= 13:
         return "th"
     return {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+
+
+def spoken_datetime(moment: datetime, tz: ZoneInfo) -> str:
+    """Render an instant the way a receptionist would say it.
+
+    Deliberately the only implementation. An earlier version had the offer path say
+    "the 14th" while the read-back path said "the 14" -- which is spoken as
+    "the fourteen" -- so the two paths now share this.
+    """
+    local = moment.astimezone(tz)
+    minute = f":{local.minute:02d}" if local.minute else ""
+    hour = local.hour % 12 or 12
+    meridiem = "am" if local.hour < 12 else "pm"
+    return f"{local:%A} the {local.day}{_ordinal(local.day)} at {hour}{minute} {meridiem}"
 
 
 async def available_slots(

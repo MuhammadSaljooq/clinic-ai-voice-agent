@@ -201,8 +201,11 @@ def build_tools(cfg: ClinicConfig) -> list[types.Tool]:
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={
-                    "patient_name": _string("The caller's full name, if they gave it."),
-                    "phone": _string("A different phone number to search, if they gave one."),
+                    # Deliberately no name lookup: matching a stranger's appointment on
+                    # a spoken name alone would hand out another patient's details.
+                    "phone": _string(
+                        "Only if the caller says they booked under a different number."
+                    ),
                 },
             ),
         ),

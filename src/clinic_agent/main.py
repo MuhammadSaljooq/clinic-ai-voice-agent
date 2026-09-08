@@ -5,32 +5,25 @@ Run with:  .venv/bin/python -m clinic_agent.main
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
+import pathlib
 
+import asyncpg
 import uvicorn
 
+from clinic_agent.agent.tools import ToolRouter
 from clinic_agent.ai.live_session import build_gemini_connector
 from clinic_agent.ai.provider import settings_from_env
 from clinic_agent.app import AppDeps, create_app
-from clinic_agent.bridge.call_session import ToolContext
 from clinic_agent.config import load_config
+from clinic_agent.db.seed import seed_from_config
 from clinic_agent.telephony.telnyx_client import TelnyxClient
 
 log = logging.getLogger(__name__)
 
-
-async def not_wired_yet(name: str, args: dict, ctx: ToolContext) -> dict:
-    """Placeholder until Plan 3 wires tools to the scheduler.
-
-    Returns a structured error rather than raising, so the agent apologises and offers
-    a transfer instead of the line going dead.
-    """
-    log.warning("tool %s called but handlers are not wired yet (Plan 3)", name)
-    return {
-        "error": "Scheduling tools are not connected yet.",
-        "recovery": "Apologise and offer to transfer the caller to a person.",
-    }
+MIGRATION = pathlib.Path(__file__).parent / "db" / "migrations" / "001_init.sql"
 
 
 def build_app():
@@ -48,16 +41,40 @@ def build_app():
     if not stream_url.startswith("wss://"):
         raise ValueError(f"PUBLIC_STREAM_URL must be wss://, got {stream_url!r}")
 
-    return create_app(
-        AppDeps(
-            cfg=cfg,
-            telnyx=TelnyxClient(os.environ["TELNYX_API_KEY"]),
-            public_key_b64=os.environ["TELNYX_PUBLIC_KEY"],
-            stream_url=stream_url,
-            connect_gemini=build_gemini_connector(cfg, settings),
-            tool_handler=not_wired_yet,
-        )
+    telnyx = TelnyxClient(os.environ["TELNYX_API_KEY"])
+    deps = AppDeps(
+        cfg=cfg,
+        telnyx=telnyx,
+        public_key_b64=os.environ["TELNYX_PUBLIC_KEY"],
+        stream_url=stream_url,
+        connect_gemini=build_gemini_connector(cfg, settings),
+        tool_handler=None,  # filled in by the lifespan once the pool exists
     )
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app):
+        pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], min_size=2, max_size=10)
+        # The migration is idempotent, so applying it on boot keeps deploys simple.
+        async with pool.acquire() as conn:
+            await conn.execute(MIGRATION.read_text())
+        await seed_from_config(pool, cfg)
+
+        # One router serves every call: all per-call state lives on the ToolContext,
+        # so there is nothing call-specific to keep here.
+        deps.tool_handler = ToolRouter(
+            pool=pool,
+            cfg=cfg,
+            secret=os.environ["SLOT_TOKEN_SECRET"],
+            telnyx=telnyx,
+        )
+        log.info("ready: %s, %d provider(s)", cfg.clinic.name, len(cfg.providers))
+        try:
+            yield
+        finally:
+            await pool.close()
+            await telnyx.aclose()
+
+    return create_app(deps, lifespan=lifespan)
 
 
 def main() -> None:

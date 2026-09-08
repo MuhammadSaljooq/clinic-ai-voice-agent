@@ -160,3 +160,31 @@ async def test_an_unknown_part_of_day_is_rejected(configured):
     pool, cfg = configured
     with pytest.raises(ValueError, match="unknown part_of_day"):
         await offer(pool, cfg, appointment_type_id=FOLLOW_UP, part_of_day="teatime")
+
+
+async def test_read_back_and_offer_wording_are_identical(configured):
+    """Guards the drift this consolidated: one path said 'the 14th', the other 'the 14'."""
+    from clinic_agent.scheduling.service import spoken_datetime
+
+    pool, cfg = configured
+    offers = await offer(pool, cfg, appointment_type_id=FOLLOW_UP, limit=1)
+    assert offers[0].spoken_time(cfg) == spoken_datetime(offers[0].slot.start, cfg.tz)
+
+
+def test_spoken_datetime_uses_correct_ordinals():
+    from datetime import datetime
+
+    from clinic_agent.scheduling.service import spoken_datetime
+
+    def at(day: int) -> str:
+        return spoken_datetime(datetime(2026, 9, day, 14, 0, tzinfo=NY), NY)
+
+    assert "the 1st" in at(1)
+    assert "the 2nd" in at(2)
+    assert "the 3rd" in at(3)
+    assert "the 4th" in at(4)
+    assert "the 11th" in at(11), "11th, not 11st"
+    assert "the 12th" in at(12)
+    assert "the 13th" in at(13)
+    assert "the 21st" in at(21)
+    assert "the 22nd" in at(22)
