@@ -68,12 +68,28 @@ Expect `RESULT: all configs clean` and no growth in
 .venv/bin/ruff check src tests
 ```
 
+## Running it
+
+Copy `.env.example` to `.env` and fill it in, then:
+
+```bash
+.venv/bin/python -m clinic_agent.main
+```
+
+Telnyx must be able to reach `PUBLIC_STREAM_URL` from the internet — it cannot
+dial your laptop. For local development, tunnel with ngrok and point
+`PUBLIC_STREAM_URL` at the tunnel.
+
+**Tool handlers are not wired to the scheduler yet (Plan 3).** The agent will
+answer, converse, and disclose that it is an AI, but any booking attempt returns a
+structured error and it will offer to transfer instead.
+
 ## Status
 
 | Component | State |
 |---|---|
-| Scheduling core (slots, DST, tokens, booking) | Done, 46 tests |
-| Voice bridge (Telnyx ↔ Gemini) | Plan 2 |
-| Agent tools + persona | Plan 3 |
+| Scheduling core (slots, DST, tokens, booking) | Done |
+| Voice bridge (Telnyx ↔ Gemini, barge-in, reconnect) | Done |
+| Agent tools wired to the scheduler | Plan 3 |
 | Calendar mirror, reminders, inbound SMS | Plan 4 |
 | Dashboard | Plan 5 |

@@ -159,13 +159,31 @@ for non-blocking writes in the first place.
 
 ---
 
-## Definition of done
+## Definition of done -- COMPLETE
 
-- [ ] Full suite green, lint clean
-- [ ] Byte-order handled and tested in both directions
-- [ ] Barge-in emits `clear` **and** flushes the local queue
-- [ ] Reconnect-on-`go_away` proven to preserve the session handle
-- [ ] No credentials required to run any test
+- [x] Full suite green (**166 tests**), lint clean
+- [x] Byte-order handled and tested in both directions, plus an FFT test proving
+      resampling does not shift pitch
+- [x] Barge-in emits `clear` **and** drops the local queue
+- [x] Reconnect-on-`go_away` proven to reuse the session handle, with inbound audio
+      shown not to be lost across the gap
+- [x] No credentials required to run any test
+- [x] Verified stable across 12-20 consecutive runs (async and TestClient threading
+      are flake-prone, and one green run proves little -- Plan 1 taught that)
+
+**Delivered beyond the plan:**
+- L16 codec is *refused* if Telnyx negotiates anything but L16, rather than played
+  as loud noise at the caller
+- `answer` opens the stream in one command instead of a follow-up `streaming_start`,
+  removing a round-trip of dead air at the very start of the call
+- Telnyx `speak` exposed as a fallback for when a Gemini session cannot start
+- Reconnects are capped, so a broken session cannot loop forever
+- `main.py` entrypoint and `.env.example`; startup warns loudly when the AI provider
+  is not BAA-eligible
+
+**Known gap, by design:** tool handlers are not wired to the scheduler yet (Plan 3).
+`main.py` installs a placeholder that returns a structured error, so the agent
+apologises and offers a transfer rather than failing silently.
 
 ## Explicitly deferred
 
