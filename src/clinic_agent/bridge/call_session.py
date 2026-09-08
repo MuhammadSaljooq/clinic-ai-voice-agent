@@ -445,7 +445,18 @@ class CallSession:
     # --- bookkeeping ----------------------------------------------------------
 
     def _append_transcript(self, role: str, text: str) -> None:
-        self._outcome.transcript.append({"role": role, "text": text})
+        """Merge consecutive fragments from the same speaker.
+
+        Gemini streams transcriptions in small pieces -- "Thanks for", " calling",
+        " Northside" -- so appending each one produces a transcript that is unreadable
+        and useless for reviewing a call. Fragments already carry their own leading
+        spaces, so joining them verbatim reconstructs the sentence.
+        """
+        transcript = self._outcome.transcript
+        if transcript and transcript[-1]["role"] == role:
+            transcript[-1]["text"] += text
+        else:
+            transcript.append({"role": role, "text": text})
 
     def _resolve_ended_reason(self) -> str:
         if self._unsupported_codec:

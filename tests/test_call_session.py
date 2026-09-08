@@ -370,3 +370,20 @@ async def test_a_turn_boundary_is_not_mistaken_for_a_dropped_session():
     assert gemini.receive_calls >= 2, "receive() must be re-entered for the next turn"
     # Both turns' audio reached Telnyx: 40ms at 24k -> 40ms at 16k -> 2 frames each.
     assert len(socket.media_frames) == 4
+
+
+async def test_transcript_fragments_from_one_speaker_are_merged():
+    """Gemini streams transcription in pieces; one line per fragment is unreadable."""
+    gemini = FakeGeminiSession([
+        gemini_output_transcript("Thanks for"),
+        gemini_output_transcript(" calling"),
+        gemini_output_transcript(" Northside."),
+        gemini_input_transcript("I'd like"),
+        gemini_input_transcript(" an appointment"),
+        gemini_output_transcript("Sure"),
+    ])
+    _, _, _, outcome, _ = await run_session([telnyx_start()], [gemini], max_reconnects=0)
+
+    assert [e["role"] for e in outcome.transcript] == ["agent", "caller", "agent"]
+    assert outcome.transcript[0]["text"] == "Thanks for calling Northside."
+    assert outcome.transcript[1]["text"] == "I'd like an appointment"

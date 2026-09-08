@@ -51,6 +51,14 @@ appointment_types:
     description: "Requires room prep and turnaround"
     providers: [1]
 
+reminders:
+  # Keep false until 10DLC brand + campaign registration is approved. While false
+  # the agent will not promise a text reminder it cannot deliver.
+  enabled: false
+  hours_before: 24
+  # While true the worker records what it would have sent and sends nothing.
+  dry_run: true
+
 faq:
   - q: "Where are you located?"
     a: "We're at 400 Northside Avenue, second floor. There's free parking behind the building."

@@ -110,12 +110,26 @@ class FaqEntry(BaseModel):
     a: str
 
 
+class RemindersConfig(BaseModel):
+    """SMS reminder settings.
+
+    `enabled` gates whether the agent *promises* a reminder on the call. Keeping it
+    false until 10DLC registration completes stops the agent making a promise the
+    system cannot keep.
+    """
+
+    enabled: bool = False
+    hours_before: int = Field(default=24, ge=1, le=168)
+    dry_run: bool = True
+
+
 class ClinicConfig(BaseModel):
     clinic: ClinicInfo
     slot_policy: SlotPolicyConfig = Field(default_factory=SlotPolicyConfig)
     providers: list[ProviderConfig] = Field(min_length=1)
     appointment_types: list[AppointmentTypeConfig] = Field(min_length=1)
     faq: list[FaqEntry] = Field(default_factory=list)
+    reminders: RemindersConfig = Field(default_factory=RemindersConfig)
 
     @model_validator(mode="after")
     def _cross_references_resolve(self) -> ClinicConfig:

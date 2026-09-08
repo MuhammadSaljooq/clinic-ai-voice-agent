@@ -9,6 +9,7 @@ asserted so a future prompt edit cannot quietly drop them.
 from __future__ import annotations
 
 import pathlib
+import re
 
 from google.genai import types
 
@@ -25,6 +26,15 @@ from clinic_agent.config import load_config
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 CFG = load_config(REPO / "config.yaml")
+
+
+def prompt_text(cfg=None) -> str:
+    """Lowercased with whitespace collapsed.
+
+    The prompt is hard-wrapped for readability, so a phrase can straddle a line
+    break; asserting on raw text makes tests fail for purely cosmetic reflows.
+    """
+    return re.sub(r"\s+", " ", build_system_instruction(cfg or CFG)).lower()
 
 
 # --- model choice -------------------------------------------------------------
@@ -85,21 +95,21 @@ def test_voice_is_configurable():
 # --- system instruction: the legally required parts ---------------------------
 
 def test_instruction_requires_ai_disclosure_in_the_greeting():
-    text = build_system_instruction(CFG).lower()
+    text = prompt_text()
     assert "ai" in text
     assert "first" in text or "greeting" in text
     assert "disclos" in text or "tell them" in text or "say" in text
 
 
 def test_instruction_forbids_medical_advice():
-    text = build_system_instruction(CFG).lower()
+    text = prompt_text()
     assert "medical advice" in text
     assert "symptom" in text
 
 
 def test_instruction_forbids_claiming_clinical_credentials():
     """CA AB 489: an AI must not imply it holds healthcare credentials."""
-    text = build_system_instruction(CFG).lower()
+    text = prompt_text()
     assert "nurse" in text or "doctor" in text or "credential" in text
 
 
@@ -109,12 +119,12 @@ def test_instruction_routes_emergencies_to_911():
 
 def test_instruction_admits_to_being_ai_when_asked():
     """Utah AI Policy Act: must disclose on request."""
-    text = build_system_instruction(CFG).lower()
+    text = prompt_text()
     assert "asks" in text or "ask" in text
 
 
 def test_instruction_forbids_inventing_availability():
-    text = build_system_instruction(CFG).lower()
+    text = prompt_text()
     assert "never invent" in text or "do not invent" in text or "make up" in text
 
 
@@ -222,8 +232,8 @@ def test_instruction_states_the_current_clinic_local_date():
 
 
 def test_instruction_tells_the_model_to_derive_dates_rather_than_guess():
-    text = build_system_instruction(CFG).lower()
-    assert "never guess at a date" in text
+    text = prompt_text()
+    assert "never guess a date" in text
 
 
 def test_find_slots_takes_structured_date_hints_not_free_text():
@@ -246,3 +256,58 @@ def test_thinking_is_disabled_to_keep_replies_fast():
     cfg = build_live_config(CFG)
     assert cfg.thinking_config is not None
     assert cfg.thinking_config.thinking_budget == 0
+
+
+# --- prompt qualities that make it sound like a person -------------------------
+
+
+def test_instruction_forbids_speaking_internal_option_numbers_aloud():
+    """The model books by option number, but saying "option one" to a caller is
+    exactly the tell that gives away a machine."""
+    text = prompt_text()
+    assert "option one" in text
+    assert "never say" in text
+
+
+def test_instruction_forbids_mentioning_tools_or_systems():
+    """A caller should never hear about lookups, databases or functions."""
+    text = prompt_text()
+    assert "never mention tools" in text
+    assert "databases" in text
+
+
+def test_instruction_requires_natural_time_reading():
+    text = prompt_text()
+    assert "14:30" in text, "should give an explicit example of what NOT to say"
+    assert "quarter past" in text or "two thirty" in text
+
+
+def test_instruction_covers_the_messy_parts_of_phone_calls():
+    text = prompt_text()
+    for topic in ["still there", "say it once more", "interrupt", "spelling", "wrong number"]:
+        assert topic in text, f"prompt should handle: {topic}"
+
+
+def test_instruction_requires_reading_details_back_before_booking():
+    text = prompt_text()
+    assert "read the details back" in text
+
+
+# --- the reminder promise must match reality ----------------------------------
+
+
+def test_no_reminder_is_promised_while_reminders_are_disabled():
+    """Promising a text that never arrives is worse than not mentioning it."""
+    assert CFG.reminders.enabled is False
+    text = build_system_instruction(CFG)
+    assert "not switched on yet" in text
+    assert "text reminder goes out" not in text
+
+
+def test_a_reminder_is_promised_once_reminders_are_enabled():
+    enabled = CFG.model_copy(deep=True)
+    enabled.reminders.enabled = True
+    enabled.reminders.hours_before = 24
+    text = build_system_instruction(enabled)
+    assert "text reminder goes out about 24 hours" in text
+    assert "not switched on yet" not in text
