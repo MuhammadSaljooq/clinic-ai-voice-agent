@@ -104,11 +104,30 @@ async def read_form(request: Request) -> dict[str, str]:
     return {key: values[0] for key, values in parsed.items() if values}
 
 
-def render_login(cfg: ClinicConfig, *, error: str | None = None, next_url: str = DEFAULT_LANDING) -> str:
+def render_login(
+    cfg: ClinicConfig,
+    *,
+    error: str | None = None,
+    next_url: str = DEFAULT_LANDING,
+    require_username: bool = False,
+) -> str:
     import html
 
     name = html.escape(cfg.clinic.name)
     err = f'<div class="login-err" role="alert">{html.escape(error)}</div>' if error else ""
+    if require_username:
+        username_field = """
+        <div class="field" style="margin-bottom:16px">
+          <label class="lbl" for="user">Username</label>
+          <input id="user" name="username" type="text" autocomplete="username"
+                 autofocus required placeholder="you@example.com">
+        </div>"""
+        pw_autofocus = ""
+    else:
+        # Hidden but present so password managers and assistive tech have a username.
+        username_field = ('<input type="text" name="username" value="clinic" '
+                          'autocomplete="username" aria-hidden="true" tabindex="-1" hidden>')
+        pw_autofocus = "autofocus"
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -127,13 +146,11 @@ def render_login(cfg: ClinicConfig, *, error: str | None = None, next_url: str =
       {err}
       <form method="post" action="{LOGIN_PATH}">
         <input type="hidden" name="next" value="{html.escape(next_url)}">
-        <!-- Hidden but present so password managers and assistive tech have a username. -->
-        <input type="text" name="username" value="clinic" autocomplete="username"
-               aria-hidden="true" tabindex="-1" hidden>
+        {username_field}
         <div class="field" style="margin-bottom:16px">
           <label class="lbl" for="pw">Password</label>
           <input id="pw" name="password" type="password" autocomplete="current-password"
-                 autofocus required placeholder="Enter console password">
+                 {pw_autofocus} required placeholder="Enter your password">
         </div>
         <button class="btn btn-primary" type="submit">{theme.icon("logout")} Sign in</button>
       </form>
@@ -144,25 +161,34 @@ def render_login(cfg: ClinicConfig, *, error: str | None = None, next_url: str =
 </body></html>"""
 
 
-def build_auth_router(cfg: ClinicConfig, password: str) -> APIRouter:
+def build_auth_router(cfg: ClinicConfig, password: str, *, username: str | None = None) -> APIRouter:
+    """`username` optional: when set, the login page shows a username field and requires
+    it to match (in addition to the password). When None, it's password-only."""
     router = APIRouter(tags=["auth"])
+    require_username = bool(username)
 
     @router.get(LOGIN_PATH, response_class=HTMLResponse)
     async def login_form(request: Request, next: str = DEFAULT_LANDING) -> Response:
         if verify_token(request.cookies.get(SESSION_COOKIE), password):
             return RedirectResponse(_safe_next(next), status_code=status.HTTP_303_SEE_OTHER)
-        return HTMLResponse(render_login(cfg, next_url=_safe_next(next)))
+        return HTMLResponse(render_login(cfg, next_url=_safe_next(next), require_username=require_username))
 
     @router.post(LOGIN_PATH, response_class=HTMLResponse)
     async def login_submit(request: Request) -> Response:
         form = await read_form(request)
         supplied = str(form.get("password") or "")
+        supplied_user = str(form.get("username") or "")
         target = _safe_next(str(form.get("next") or DEFAULT_LANDING))
 
-        if not hmac.compare_digest(supplied, password):
+        ok = hmac.compare_digest(supplied, password)
+        if require_username:
+            ok = hmac.compare_digest(supplied_user, username) and ok
+        if not ok:
             log.warning("failed dashboard login attempt")
+            message = ("That username or password is not correct." if require_username
+                       else "That password is not correct.")
             return HTMLResponse(
-                render_login(cfg, error="That password is not correct.", next_url=target),
+                render_login(cfg, error=message, next_url=target, require_username=require_username),
                 status_code=status.HTTP_401_UNAUTHORIZED,
             )
 

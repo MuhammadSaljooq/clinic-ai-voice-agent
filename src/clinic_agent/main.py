@@ -118,6 +118,7 @@ def build_app():
         connect_gemini=build_gemini_connector(cfg, settings),
         tool_handler=None,  # filled in by the lifespan once the pool exists
         dashboard_password=os.environ.get("DASHBOARD_PASSWORD") or None,
+        dashboard_username=os.environ.get("DASHBOARD_USERNAME") or None,
         stream_secret=stream_secret,
     )
     if not deps.dashboard_password:

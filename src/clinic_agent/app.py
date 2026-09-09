@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import RedirectResponse
 
 from clinic_agent.bridge.call_session import CallSession, ToolHandler
 from clinic_agent.config import ClinicConfig
@@ -94,6 +95,8 @@ class AppDeps:
     # Dashboard is mounted only when a password is set, so it cannot be exposed by
     # forgetting to configure it.
     dashboard_password: str | None = None
+    # Optional username: when set, the login page requires it alongside the password.
+    dashboard_username: str | None = None
     # When set, the media-streaming WebSocket requires this secret in its URL, so a
     # stranger who finds the endpoint cannot open a Gemini-billed session or spoof a
     # caller. Telnyx frames are unsigned, so the URL secret is the lever we have.
@@ -132,6 +135,12 @@ def create_app(deps: AppDeps, *, lifespan: Any | None = None) -> FastAPI:
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok", "clinic": deps.cfg.clinic.name}
+
+    @app.get("/", include_in_schema=False)
+    async def root() -> Response:
+        # The bare domain has no page of its own; send people to the console (or health).
+        target = "/login" if deps.dashboard_password else "/health"
+        return RedirectResponse(target, status_code=307)
 
     @app.post("/telnyx/webhook")
     async def telnyx_webhook(request: Request) -> Response:
@@ -234,7 +243,7 @@ def create_app(deps: AppDeps, *, lifespan: Any | None = None) -> FastAPI:
         # pool, telnyx and the sender number are resolved lazily: the lifespan fills
         # them in after the app is built. The login page and session live at the app
         # root; the console under /dashboard.
-        app.include_router(build_auth_router(deps.cfg, deps.dashboard_password))
+        app.include_router(build_auth_router(deps.cfg, deps.dashboard_password, username=deps.dashboard_username))
         app.include_router(
             build_dashboard(
                 deps.cfg,

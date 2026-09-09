@@ -105,6 +105,28 @@ async def test_logout_clears_the_session():
         assert (await c.get("/guarded")).status_code == 303
 
 
+async def test_username_and_password_both_required_when_username_configured():
+    FORM = {"content-type": "application/x-www-form-urlencoded"}
+    app = FastAPI()
+    app.include_router(build_auth_router(CFG, PW, username="adrian@nhs.com"))
+
+    @app.get("/guarded")
+    async def guarded(_=Depends(require_session(PW))):
+        return {"ok": True}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        # the page now shows a username field
+        page = (await c.get("/login")).text
+        assert 'id="user"' in page and 'name="username"' in page
+        # right password but wrong username -> rejected
+        bad = await c.post("/login", content=f"username=nope&password={PW}", headers=FORM)
+        assert bad.status_code == 401
+        # both correct -> session opens
+        ok = await c.post("/login", content=f"username=adrian@nhs.com&password={PW}", headers=FORM)
+        assert ok.status_code == 303
+        assert (await c.get("/guarded")).json() == {"ok": True}
+
+
 async def test_an_open_redirect_next_is_refused():
     """?next must stay same-site; an absolute URL falls back to the default landing."""
     async with AsyncClient(transport=ASGITransport(app=_app()), base_url="http://t") as c:
