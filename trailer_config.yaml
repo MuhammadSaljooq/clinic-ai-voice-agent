@@ -1,0 +1,36 @@
+# Trailer-rental business configuration. Loaded only when TRAILER_CONFIG points here
+# (or this file is present); absent = the trailer agent is simply not wired.
+
+business:
+  name: Ridgeline Trailer Rentals
+  timezone: America/New_York
+  human_transfer_number: "+15550000000"
+  phone_display: "(555) 210-4400"
+
+rental:
+  min_days: 1
+  max_days: 30
+  min_lead_days: 0        # earliest pickup, relative to today
+  booking_horizon_days: 120
+
+trailer_types:
+  - id: 1
+    name: 6x12 Utility
+    description: Open utility trailer, 6 by 12 feet, 3,500 lb capacity.
+    daily_rate: 45.00
+    deposit: 150.00
+    units: 3
+  - id: 2
+    name: 7x14 Enclosed Cargo
+    description: Enclosed cargo trailer, 7 by 14 feet, with a rear ramp door.
+    daily_rate: 75.00
+    deposit: 250.00
+    units: 2
+
+faq:
+  - q: What do I need to bring to pick up a trailer?
+    a: A valid driver's license and a vehicle with the right hitch and ball size.
+  - q: Do I need my own insurance?
+    a: Your auto insurance usually covers a trailer you tow; check with your provider.
+  - q: What are your hours?
+    a: We're open eight to five, Monday through Saturday, for pickups and returns.

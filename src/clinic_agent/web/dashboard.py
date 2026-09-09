@@ -158,7 +158,7 @@ async function start(){
   running = true; chunkNo = 0; acc = new Float32Array(0);
   setStatus('Connecting…');
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(proto + '://' + location.host + '/dashboard/testcall');
+  ws = new WebSocket(proto + '://' + location.host + '__WS_PATH__');
   ws.onopen = () => { setStatus('Listening — say hello'); ws.send(JSON.stringify({event:'start', stream_id:'browser', start:{call_control_id:'browser-test', call_session_id:'bt', from:'browser-tester', to:'console', media_format:{encoding:'L16', sample_rate:16000, channels:1}}})); };
   ws.onmessage = ev => { let m; try { m = JSON.parse(ev.data); } catch(e){ return; }
     if (m.event === 'media' && m.media && m.media.payload) pushAudio(unb64(m.media.payload));
@@ -200,23 +200,19 @@ window.addEventListener('beforeunload', () => { if (running) stop(); });
 """
 
 
-def render_test_page(cfg: ClinicConfig, *, enabled: bool, inbox_count: int) -> str:
-    if not enabled:
-        body = empty_state(
-            "mic", "Voice agent not configured",
-            "Set GEMINI_API_KEY (or Vertex) so the agent can connect, then reload to talk to it.",
-        )
-        return shell("Test agent", "test", cfg, f'<div class="card">{body}</div>',
-                     lead="Talk to the AI", inbox_count=inbox_count)
-
-    js = _TEST_JS.replace("__MIC__", icon("mic")).replace("__STOP__", icon("stop"))
-    body = f"""<div class="test">
+def render_test_console_body(*, ws_path: str, hint: str) -> str:
+    """The mic test-console body (panel + conversation + engine JS), reusable by any
+    agent. `ws_path` is the WebSocket route to run the CallSession on."""
+    js = (_TEST_JS
+          .replace("__MIC__", icon("mic"))
+          .replace("__STOP__", icon("stop"))
+          .replace("__WS_PATH__", ws_path))
+    return f"""<div class="test">
       <div class="card test-panel">
         <button id="talk" class="talk-btn" type="button" aria-label="Start talking to the agent">{icon("mic")}</button>
         <div class="test-status" id="tstatus">Tap to talk to the agent</div>
         <div class="level" aria-hidden="true"><i id="level-fill"></i></div>
-        <p class="test-hint">Talk to the AI receptionist live through your microphone — the same
-        engine that answers calls. Nothing is dialed. Works best in Chrome; allow mic access when asked.</p>
+        <p class="test-hint">{html.escape(hint)}</p>
       </div>
       <div class="card convo test-convo">
         <div class="convo-head"><div class="avatar">AI</div>
@@ -226,6 +222,22 @@ def render_test_page(cfg: ClinicConfig, *, enabled: bool, inbox_count: int) -> s
       </div>
     </div>
     <script>{js}</script>"""
+
+
+def render_test_page(cfg: ClinicConfig, *, enabled: bool, inbox_count: int) -> str:
+    if not enabled:
+        body = empty_state(
+            "mic", "Voice agent not configured",
+            "Set GEMINI_API_KEY (or Vertex) so the agent can connect, then reload to talk to it.",
+        )
+        return shell("Test agent", "test", cfg, f'<div class="card">{body}</div>',
+                     lead="Talk to the AI", inbox_count=inbox_count)
+
+    body = render_test_console_body(
+        ws_path="/dashboard/testcall",
+        hint="Talk to the AI receptionist live through your microphone — the same engine that "
+             "answers calls. Nothing is dialed. Works best in Chrome; allow mic access when asked.",
+    )
     return shell("Test agent", "test", cfg, body, lead="Talk to the AI",
                  inbox_count=inbox_count, full_bleed=True)
 

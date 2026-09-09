@@ -98,6 +98,11 @@ class AppDeps:
     # stranger who finds the endpoint cannot open a Gemini-billed session or spoof a
     # caller. Telnyx frames are unsigned, so the URL secret is the lever we have.
     stream_secret: str | None = None
+    # Second, independent agent: the trailer-rental console section is wired only when a
+    # trailer config is present. All three are filled in together or left None.
+    trailer_cfg: Any | None = None
+    trailer_connect_gemini: Callable[[str | None], Any] | None = None
+    trailer_tool_handler: ToolHandler | None = None
 
 
 class TelnyxWebSocketAdapter:
@@ -241,6 +246,22 @@ def create_app(deps: AppDeps, *, lifespan: Any | None = None) -> FastAPI:
                 tool_handler_getter=lambda: deps.tool_handler,
             )
         )
+        # The trailer-rental console section, mounted lazily: the lifespan decides at
+        # request time whether the trailer agent is configured. The router is always
+        # mounted (its config comes from deps at build time), but the pages/WS degrade
+        # gracefully when the agent isn't wired.
+        from clinic_agent.web.rental_dashboard import build_rental_dashboard
+
+        if deps.trailer_cfg is not None:
+            app.include_router(
+                build_rental_dashboard(
+                    deps.trailer_cfg,
+                    lambda: deps.pool,
+                    deps.dashboard_password,
+                    connect_gemini=deps.trailer_connect_gemini,
+                    tool_handler_getter=lambda: deps.trailer_tool_handler,
+                )
+            )
 
     def _stream_authorised(token: str | None) -> bool:
         # No secret configured: accept anything (dev / backward compatible), but the
