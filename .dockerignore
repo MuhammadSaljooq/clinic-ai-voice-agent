@@ -1,0 +1,19 @@
+# Keep the image small and secrets out of it.
+.git
+.gitignore
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.env
+.env.*
+tests
+docs
+scripts
+.playwright-mcp
+*.png
+htmlcov
+.mypy_cache
+.DS_Store
