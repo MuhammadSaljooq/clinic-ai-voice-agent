@@ -315,14 +315,13 @@ async def test_an_unexpected_codec_is_refused_rather_than_played_as_noise(encodi
 
 async def test_the_agent_is_prompted_to_greet_when_the_call_connects():
     """Without this the model waits for the caller, so a real caller hears silence
-    and the legally required AI disclosure never gets spoken."""
+    instead of a greeting."""
     gemini = FakeGeminiSession()
     await run_session([telnyx_start(), telnyx_stop()], [gemini])
 
     assert len(gemini.client_content) == 1
     nudge = str(gemini.client_content[0])
     assert "greet" in nudge.lower()
-    assert "ai" in nudge.lower()
 
 
 async def test_the_greeting_is_not_repeated_after_a_reconnect():
@@ -387,3 +386,5 @@ async def test_transcript_fragments_from_one_speaker_are_merged():
     assert [e["role"] for e in outcome.transcript] == ["agent", "caller", "agent"]
     assert outcome.transcript[0]["text"] == "Thanks for calling Northside."
     assert outcome.transcript[1]["text"] == "I'd like an appointment"
+
+

@@ -8,3 +8,6 @@ service-account*.json
 .DS_Store
 .tts-cache/
 agent_reply.wav
+
+# Playwright MCP browser artifacts
+.playwright-mcp/

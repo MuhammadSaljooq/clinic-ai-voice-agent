@@ -75,7 +75,10 @@ def build_app():
     # Read .env so secrets stay in a gitignored file rather than shell history.
     # Explicit path: bare load_dotenv() searches from the caller's directory and
     # silently loads nothing when the working directory differs.
-    load_dotenv(pathlib.Path(__file__).resolve().parents[2] / ".env")
+    # override=True: .env is the source of truth. Without it, a stale value exported in
+    # the launching shell (e.g. an old GEMINI_API_KEY) silently shadows .env and the app
+    # authenticates with the wrong key -- a genuinely baffling failure to debug.
+    load_dotenv(pathlib.Path(__file__).resolve().parents[2] / ".env", override=True)
 
     cfg = load_config(os.environ.get("CLINIC_CONFIG", "config.yaml"))
     settings = settings_from_env()
@@ -91,6 +94,21 @@ def build_app():
     if not stream_url.startswith("wss://"):
         raise ValueError(f"PUBLIC_STREAM_URL must be wss://, got {stream_url!r}")
 
+    # Secret guarding the media WebSocket. Telnyx stream frames are unsigned, so this
+    # URL secret is what stops a stranger opening a Gemini-billed session on the line.
+    stream_secret = os.environ.get("STREAM_SECRET") or None
+    if not stream_secret:
+        log.warning(
+            "STREAM_SECRET is unset: /telnyx/stream accepts any connection. Set it (and "
+            "include it in PUBLIC_STREAM_URL) before exposing this server publicly."
+        )
+    elif stream_secret not in stream_url:
+        log.warning(
+            "STREAM_SECRET is set but PUBLIC_STREAM_URL does not contain it, so Telnyx "
+            "will connect without the secret and be rejected. Append it to the URL, e.g. "
+            "%s/<secret> or %s?token=<secret>.", stream_url, stream_url,
+        )
+
     telnyx = TelnyxClient(os.environ["TELNYX_API_KEY"])
     deps = AppDeps(
         cfg=cfg,
@@ -100,6 +118,7 @@ def build_app():
         connect_gemini=build_gemini_connector(cfg, settings),
         tool_handler=None,  # filled in by the lifespan once the pool exists
         dashboard_password=os.environ.get("DASHBOARD_PASSWORD") or None,
+        stream_secret=stream_secret,
     )
     if not deps.dashboard_password:
         log.info("dashboard disabled (DASHBOARD_PASSWORD unset)")

@@ -117,8 +117,14 @@ async def handle_inbound(
         soonest = upcoming[0]
         await cancel(pool, soonest.appointment_id)
         if mirror is not None:
-            # Otherwise the cancelled slot stays on the provider's phone.
-            await mirror.on_cancelled(pool, soonest.appointment_id)
+            # Otherwise the cancelled slot stays on the provider's phone. The
+            # cancellation has already committed, so a mirror or DB hiccup here must not
+            # turn a done deal into a 500 (which Telnyx would retry) or swallow the
+            # patient's confirmation -- the same isolation the voice path gives it.
+            try:
+                await mirror.on_cancelled(pool, soonest.appointment_id)
+            except Exception:
+                log.exception("calendar mirror failed after an SMS cancellation")
         log.info("appointment %s cancelled by SMS", soonest.appointment_id)
         return InboundResult(
             "cancelled", compose_cancellation_confirmation(clinic, phone_display)

@@ -232,3 +232,83 @@ async def test_a_sent_reminder_is_never_retried(clinic_db):
     await run_once(pool, cfg, telnyx=telnyx, from_number=FROM_NUMBER, now=NOW)
     await run_once(pool, cfg, telnyx=telnyx, from_number=FROM_NUMBER, now=NOW)
     assert len(telnyx.sent) == 1
+
+
+# --- crash recovery ------------------------------------------------------------
+
+
+async def test_a_lease_stuck_in_claimed_after_a_crash_is_recovered(clinic_db):
+    """A worker that died between claiming and sending must not strand the reminder."""
+    pool, cfg = clinic_db
+    appointment = await add_appointment(pool, hours_from_now=20)
+    # Simulate the crash: a claim taken 30 minutes ago that never reached the network.
+    await pool.execute(
+        "INSERT INTO reminders (appointment_id, scheduled_for, status, attempts, updated_at)"
+        " VALUES ($1, now(), 'claimed', 1, $2)",
+        appointment, NOW - timedelta(minutes=30),
+    )
+    telnyx = FakeTelnyx()
+
+    run = await run_once(pool, cfg, telnyx=telnyx, from_number=FROM_NUMBER, now=NOW)
+
+    assert run.sent == 1
+    assert len(telnyx.sent) == 1
+    row = await status_of(pool, appointment)
+    assert row["status"] == "sent"
+    assert row["attempts"] == 2, "the recovery counts as another attempt"
+
+
+async def test_a_fresh_claim_is_left_alone(clinic_db):
+    """A claim taken moments ago belongs to a worker that may still be sending; stealing
+    it is exactly how a patient would get texted twice."""
+    pool, cfg = clinic_db
+    appointment = await add_appointment(pool, hours_from_now=20)
+    await pool.execute(
+        "INSERT INTO reminders (appointment_id, scheduled_for, status, attempts, updated_at)"
+        " VALUES ($1, now(), 'claimed', 1, $2)",
+        appointment, NOW,  # just now -- still within the lease
+    )
+    telnyx = FakeTelnyx()
+
+    run = await run_once(pool, cfg, telnyx=telnyx, from_number=FROM_NUMBER, now=NOW)
+
+    assert telnyx.sent == [], "a fresh claim must not be reclaimed"
+    assert run.considered == 0
+    assert (await status_of(pool, appointment))["status"] == "claimed"
+
+
+async def test_a_message_in_sending_is_never_resent(clinic_db):
+    """The ambiguous 'may already have gone out' state is left for a human, never auto-
+    resent -- the whole design would rather miss a reminder than double one."""
+    pool, cfg = clinic_db
+    appointment = await add_appointment(pool, hours_from_now=20)
+    await pool.execute(
+        "INSERT INTO reminders (appointment_id, scheduled_for, status, attempts, updated_at)"
+        " VALUES ($1, now(), 'sending', 1, $2)",
+        appointment, NOW - timedelta(hours=2),  # old, but still not eligible
+    )
+    telnyx = FakeTelnyx()
+
+    run = await run_once(pool, cfg, telnyx=telnyx, from_number=FROM_NUMBER, now=NOW)
+
+    assert telnyx.sent == []
+    assert run.considered == 0
+
+
+async def test_an_optout_skip_is_restored_after_the_patient_opts_back_in(clinic_db):
+    pool, cfg = clinic_db
+    appointment = await add_appointment(pool, hours_from_now=20, opted_out=True)
+    telnyx = FakeTelnyx()
+
+    await run_once(pool, cfg, telnyx=telnyx, from_number=FROM_NUMBER, now=NOW)
+    assert (await status_of(pool, appointment))["status"] == "skipped_opted_out"
+
+    # Still opted out: a later run must not churn the row.
+    again = await run_once(pool, cfg, telnyx=telnyx, from_number=FROM_NUMBER, now=NOW)
+    assert again.considered == 0
+
+    # They reply START, then a later run reminds them after all.
+    await pool.execute("UPDATE patients SET sms_opted_out = FALSE WHERE phone = '+15550100'")
+    run = await run_once(pool, cfg, telnyx=telnyx, from_number=FROM_NUMBER, now=NOW)
+    assert run.sent == 1
+    assert (await status_of(pool, appointment))["status"] == "sent"

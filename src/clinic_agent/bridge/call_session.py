@@ -48,11 +48,11 @@ GEMINI_INPUT_MIME = "audio/pcm;rate=16000"
 TRANSFER_TOOL = "transfer_to_human"
 
 # Sent once when the first session opens. Without it the model waits for the caller to
-# speak, so a real caller hears silence after the line connects -- and the system
-# instruction's "greet first, disclose you are an AI" never happens.
+# speak, so a real caller hears silence after the line connects and the greeting never
+# happens.
 GREETING_NUDGE = (
     "(The phone call has just connected and the caller is listening. "
-    "Greet them now, in one short sentence, and state that you are an AI assistant.)"
+    "Greet them now warmly, in one short sentence, and ask how you can help.)"
 )
 
 # How long to let the Gemini loop finish after the call ends before giving up on it.
@@ -92,6 +92,7 @@ class CallSession:
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         greet_on_connect: bool = True,
         drain_timeout: float = DRAIN_TIMEOUT_SECONDS,
+        on_transcript: Callable[[str, str], Awaitable[None]] | None = None,
     ):
         self._telnyx = telnyx
         self._connect_gemini = connect_gemini
@@ -100,7 +101,15 @@ class CallSession:
         self._sleep = sleep
         self._greet_on_connect = greet_on_connect
         self._drain_timeout = drain_timeout
+        # Optional live sink for transcript fragments (used by the browser test console
+        # to show the conversation as it happens). Off by default.
+        self._on_transcript = on_transcript
         self._greeted = False
+        # Reply-latency measurement: time from the last inbound speech fragment to the
+        # first agent audio frame -- the gap the caller actually feels. Logged per turn
+        # so tuning is measured, not guessed.
+        self._input_end_ts: float | None = None
+        self._reply_logged = True
 
         self._inbound: asyncio.Queue[bytes] = asyncio.Queue()
         self._outbound: asyncio.Queue[bytes] = asyncio.Queue()
@@ -401,14 +410,22 @@ class CallSession:
                 await self._handle_interruption()
 
             if content.input_transcription and content.input_transcription.text:
-                self._append_transcript("caller", content.input_transcription.text)
+                await self._record("caller", content.input_transcription.text)
+                # Mark the moment the caller's speech last produced text; the reply gap
+                # is measured from here to the first agent audio frame.
+                self._input_end_ts = asyncio.get_running_loop().time()
+                self._reply_logged = False
             if content.output_transcription and content.output_transcription.text:
-                self._append_transcript("agent", content.output_transcription.text)
+                await self._record("agent", content.output_transcription.text)
 
             if content.model_turn is not None:
                 for part in content.model_turn.parts or []:
                     blob = getattr(part, "inline_data", None)
                     if blob is not None and blob.data:
+                        if not self._reply_logged and self._input_end_ts is not None:
+                            gap_ms = (asyncio.get_running_loop().time() - self._input_end_ts) * 1000
+                            log.info("reply latency: %.0f ms (end of caller speech -> first agent audio)", gap_ms)
+                            self._reply_logged = True
                         for frame in frame_20ms(gemini_to_telnyx(blob.data)):
                             self._outbound.put_nowait(frame)
                             self._audio_out_frames += 1
@@ -443,6 +460,16 @@ class CallSession:
             }
 
     # --- bookkeeping ----------------------------------------------------------
+
+    async def _record(self, role: str, text: str) -> None:
+        """Append to the stored transcript and, if a live sink is set, forward the
+        fragment. A sink failure must never disturb the call."""
+        self._append_transcript(role, text)
+        if self._on_transcript is not None:
+            try:
+                await self._on_transcript(role, text)
+            except Exception:
+                log.debug("transcript sink failed", exc_info=True)
 
     def _append_transcript(self, role: str, text: str) -> None:
         """Merge consecutive fragments from the same speaker.

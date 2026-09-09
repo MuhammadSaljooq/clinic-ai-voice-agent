@@ -71,15 +71,22 @@ class Booked:
     ends_at: datetime
 
 
-async def _upsert_patient(conn: asyncpg.Connection, name: str, phone: str) -> int:
+async def _upsert_patient(
+    conn: asyncpg.Connection, name: str, phone: str, email: str | None = None
+) -> int:
+    # COALESCE on email so a later booking without an email does not wipe one already
+    # on file for this number.
     return await conn.fetchval(
         """
-        INSERT INTO patients (name, phone) VALUES ($1, $2)
-        ON CONFLICT (phone) DO UPDATE SET name = EXCLUDED.name
+        INSERT INTO patients (name, phone, email) VALUES ($1, $2, $3)
+        ON CONFLICT (phone) DO UPDATE
+        SET name = EXCLUDED.name,
+            email = COALESCE(EXCLUDED.email, patients.email)
         RETURNING id
         """,
         name,
         phone,
+        email,
     )
 
 
@@ -120,6 +127,7 @@ async def book(
     secret: str,
     patient_name: str,
     patient_phone: str,
+    patient_email: str | None = None,
     source: str = "voice_agent",
     now: datetime | None = None,
 ) -> Booked:
@@ -145,7 +153,7 @@ async def book(
                 f"token duration {slot.end - slot.start} != type duration {expected}"
             )
 
-        patient_id = await _upsert_patient(conn, patient_name, patient_phone)
+        patient_id = await _upsert_patient(conn, patient_name, patient_phone, patient_email)
 
         blocked_start = slot.start - timedelta(minutes=type_row["buffer_before_min"])
         blocked_end = slot.end + timedelta(minutes=type_row["buffer_after_min"])
@@ -191,6 +199,19 @@ async def book(
         starts_at=slot.start,
         ends_at=slot.end,
     )
+
+
+async def _reset_reminder(conn: asyncpg.Connection, appointment_id: int) -> None:
+    """Drop the reminder bookkeeping for an appointment whose time is changing.
+
+    `reminders.appointment_id` is UNIQUE, and the worker only re-selects rows that are
+    absent or 'failed' -- so a reminder already 'sent'/'dry_run'/'skipped' for the OLD
+    time would otherwise permanently suppress a reminder for the NEW time, and a patient
+    who moved their appointment would silently never be reminded. Deleting the row lets
+    the worker schedule a fresh reminder; the text actually sent for the old time is
+    preserved in the message log, so nothing auditable is lost.
+    """
+    await conn.execute("DELETE FROM reminders WHERE appointment_id = $1", appointment_id)
 
 
 async def cancel(pool: asyncpg.Pool, appointment_id: int) -> None:
@@ -272,6 +293,9 @@ async def reschedule(
             raise SlotTaken(
                 f"{slot.start.isoformat()} is no longer available for provider {slot.provider_id}"
             ) from exc
+
+        # The appointment moved, so any reminder scheduled for the old time is stale.
+        await _reset_reminder(conn, appointment_id)
 
     return Booked(
         appointment_id=appointment_id,
