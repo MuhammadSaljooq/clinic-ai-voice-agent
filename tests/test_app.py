@@ -33,7 +33,7 @@ class StubTelnyx:
         return {}
 
 
-def build(*, gemini_sessions=(), on_finished=None):
+def build(*, gemini_sessions=(), on_finished=None, stream_secret=None):
     key = SigningKey.generate()
     public = base64.b64encode(bytes(key.verify_key)).decode()
     telnyx = StubTelnyx()
@@ -50,6 +50,7 @@ def build(*, gemini_sessions=(), on_finished=None):
         connect_gemini=FakeConnector(*gemini_sessions),
         tool_handler=None,
         on_call_finished=on_finished or record,
+        stream_secret=stream_secret,
     )
     return TestClient(create_app(deps)), key, telnyx, finished
 
@@ -139,6 +140,43 @@ def test_the_stream_websocket_carries_audio_both_ways():
     assert len(base64.b64decode(frame["media"]["payload"])) == FRAME_BYTES
 
 
+# --- stream secret ------------------------------------------------------------
+
+STREAM_SECRET = "s3cret-stream-token"
+
+
+def test_the_stream_rejects_a_connection_missing_the_secret():
+    """Without the secret, a stranger could open a Gemini-billed session on the line."""
+    client, *_ = build(stream_secret=STREAM_SECRET)
+    got_frame = False
+    with contextlib.suppress(Exception), client.websocket_connect("/telnyx/stream") as ws:
+        ws.send_text(telnyx_start())
+        ws.receive_text()
+        got_frame = True
+    assert not got_frame, "an unauthorised connection was served"
+
+
+def test_the_stream_rejects_a_wrong_secret():
+    client, *_ = build(stream_secret=STREAM_SECRET)
+    got_frame = False
+    with contextlib.suppress(Exception), client.websocket_connect("/telnyx/stream/wrong") as ws:
+        ws.send_text(telnyx_start())
+        ws.receive_text()
+        got_frame = True
+    assert not got_frame
+
+
+def test_the_stream_accepts_the_configured_secret_in_the_path():
+    tone = (np.sin(np.arange(2400) / 8) * 8000).astype("<i2").tobytes()
+    client, *_ = build(gemini_sessions=[FakeGeminiSession([gemini_audio(tone)])],
+                       stream_secret=STREAM_SECRET)
+    received: list[str] = []
+    with contextlib.suppress(Exception), client.websocket_connect(f"/telnyx/stream/{STREAM_SECRET}") as ws:
+        ws.send_text(telnyx_start(call_control_id="ccid-ws"))
+        received.append(ws.receive_text())
+    assert received, "the correct secret should have been served"
+
+
 # --- the WebSocket adapter ----------------------------------------------------
 
 
@@ -196,9 +234,19 @@ def test_a_signed_messaging_webhook_without_a_pool_does_not_crash():
     assert response.text == "not configured"
 
 
-def test_non_message_events_are_acknowledged_and_ignored():
+def test_unhandled_message_events_are_acknowledged_and_ignored():
     client, key, *_ = build()
-    body = json.dumps({"data": {"event_type": "message.sent", "payload": {}}}).encode()
+    body = json.dumps({"data": {"event_type": "message.updated", "payload": {}}}).encode()
     response = client.post("/telnyx/messaging", content=body, headers=signed_headers(key, body))
     assert response.status_code == 200
     assert response.text == "ignored"
+
+
+def test_delivery_receipts_are_acknowledged():
+    """message.sent/finalized report what happened to a message we sent; they are
+    handled (to update the inbox), not treated as new inbound messages."""
+    client, key, *_ = build()
+    body = json.dumps({"data": {"event_type": "message.sent", "payload": {"id": "m1"}}}).encode()
+    response = client.post("/telnyx/messaging", content=body, headers=signed_headers(key, body))
+    assert response.status_code == 200
+    assert response.text == "delivery"

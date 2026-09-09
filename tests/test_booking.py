@@ -324,3 +324,27 @@ async def test_lookup_without_phone_or_name_is_refused(clinic):
     """Returning every patient's appointments would be a privacy failure."""
     with pytest.raises(ValueError, match="requires phone or name"):
         await find_upcoming_appointments(clinic, now=NOW)
+
+
+async def test_rescheduling_clears_a_stale_reminder_for_the_old_time(clinic):
+    """A reminder already sent for the old time would otherwise block the worker from
+    ever reminding the patient about the new time."""
+    booked = await book_at(clinic, AT_3PM)
+    await clinic.execute(
+        "INSERT INTO reminders (appointment_id, scheduled_for, status, body, attempts)"
+        " VALUES ($1, now(), 'sent', 'reminder for the old time', 1)",
+        booked.appointment_id,
+    )
+
+    await reschedule(
+        clinic,
+        appointment_id=booked.appointment_id,
+        slot_token=token(AT_3PM + timedelta(days=1)),
+        secret=TEST_SECRET,
+        now=NOW,
+    )
+
+    remaining = await clinic.fetchval(
+        "SELECT count(*) FROM reminders WHERE appointment_id = $1", booked.appointment_id
+    )
+    assert remaining == 0, "the stale reminder must be cleared so a fresh one can go out"

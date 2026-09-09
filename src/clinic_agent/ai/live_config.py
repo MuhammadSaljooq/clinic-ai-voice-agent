@@ -6,6 +6,7 @@ prompt and every tool contract are unit-testable.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from google.genai import types
@@ -25,10 +26,38 @@ DEFAULT_VOICE = "Kore"
 COMPRESSION_TRIGGER_TOKENS = 25_600
 COMPRESSION_TARGET_TOKENS = 8_000
 
-# Phone lines carry background noise; a little patience beats cutting callers off
-# mid-sentence. Tunable per deployment.
-END_OF_SPEECH_SILENCE_MS = 600
-PREFIX_PADDING_MS = 120
+# Turn-taking is the single biggest lever on how fast the agent answers. The time a
+# caller waits after finishing a sentence is roughly: this silence window + how long
+# the detector holds out for "are they really done?" (end-of-speech sensitivity).
+#
+# The earlier defaults (600 ms of silence + LOW end sensitivity) were deliberately
+# patient, but on a real line they stack into multi-second gaps that read as a laggy
+# machine. These snappier defaults cut that materially; every value is overridable per
+# deployment (VAD_SILENCE_MS, VAD_PREFIX_PADDING_MS, VAD_END_SENSITIVITY,
+# VAD_START_SENSITIVITY) so a noisy clinic that finds callers being clipped can dial
+# patience back up without a code change. Barge-in still lets a caller cut the agent
+# off instantly, so erring toward responsiveness is safe.
+DEFAULT_END_OF_SPEECH_SILENCE_MS = 400
+DEFAULT_PREFIX_PADDING_MS = 100
+DEFAULT_END_SENSITIVITY = types.EndSensitivity.END_SENSITIVITY_HIGH
+DEFAULT_START_SENSITIVITY = types.StartSensitivity.START_SENSITIVITY_HIGH
+
+
+@dataclass(frozen=True, slots=True)
+class VadTuning:
+    """Voice-activity-detection parameters that govern reply latency.
+
+    A value object so the numbers can be resolved from the environment at the edge and
+    the config builder stays pure and unit-testable.
+    """
+
+    silence_ms: int = DEFAULT_END_OF_SPEECH_SILENCE_MS
+    prefix_padding_ms: int = DEFAULT_PREFIX_PADDING_MS
+    end_sensitivity: types.EndSensitivity = DEFAULT_END_SENSITIVITY
+    start_sensitivity: types.StartSensitivity = DEFAULT_START_SENSITIVITY
+    # When False, the agent finishes its current utterance even if the caller talks over
+    # it (NO_INTERRUPTION). True keeps barge-in, where the caller can cut it off.
+    interruptible: bool = True
 
 # Thinking is off. Measured on a real session, leaving it on put roughly six seconds
 # between the caller finishing a sentence and hearing anything back -- the single
@@ -105,11 +134,9 @@ Work out "today", "tomorrow", "next week" and named days from this. Never guess 
 date -- always derive it from the line above.
 
 HOW TO OPEN
-Your very first sentence greets them and says you are an AI assistant. This is a
-legal requirement and it has to happen immediately, before anything else. Say it
-like a person mentioning it in passing, not like a disclaimer being read out.
-Good: "Thanks for calling {cfg.clinic.name}, this is an AI assistant -- how can I
-help you today?"
+Your very first sentence is a warm, brief greeting: say who they have reached and ask
+how you can help.
+Good: "Thanks for calling {cfg.clinic.name} -- how can I help you today?"
 Then stop talking and let them speak. Do not launch into a menu of options.
 If they ever ask whether you are a real person, a bot, a recording or an AI, tell
 them the truth straight away, warmly, and carry on.
@@ -186,9 +213,13 @@ BOOKING AN APPOINTMENT
 2. Search for slots, saying something first so the line is not silent.
 3. Offer the times conversationally: "I've got Tuesday at ten, or Wednesday at
    half nine -- would either of those work?"
-4. Get their full name. You already have their number from caller ID, so only ask
-   for a number if they want you to use a different one.
-5. Read the details back before you book it: the day, the time, and who with.
+4. Take their details -- you need all three to book: their first name, their last
+   name, and a contact phone number. Ask for the first and last name. For the phone,
+   read back the number they are calling from to confirm it ("is the best number the
+   one you're calling from, ending seven-two-three-four?"), or take a different one if
+   they prefer. Ask if they would like to add an email for confirmations -- optional.
+5. Read the details back before you book it: their name, the day, the time, and who
+   with.
 6. Book it, then confirm it is done in one short sentence.
 {reminder_line}
 
@@ -290,8 +321,10 @@ def build_tools(cfg: ClinicConfig) -> list[types.Tool]:
             name="book_appointment",
             behavior=types.Behavior.BLOCKING,
             description=(
-                "Book one of the numbered options that find_slots returned. Do not tell "
-                "the caller it is booked until this returns successfully."
+                "Book one of the numbered options that find_slots returned. Collect the "
+                "caller's first name, last name and a contact phone number first -- all "
+                "three are required. Do not tell the caller it is booked until this "
+                "returns successfully."
             ),
             parameters=types.Schema(
                 type=types.Type.OBJECT,
@@ -300,12 +333,15 @@ def build_tools(cfg: ClinicConfig) -> list[types.Tool]:
                         type=types.Type.INTEGER,
                         description="The option number the caller chose, as returned by find_slots.",
                     ),
-                    "patient_name": _string("The caller's full name."),
-                    "callback_phone": _string(
-                        "Only if the caller wants a different number from the one they called from."
+                    "first_name": _string("The caller's first name."),
+                    "last_name": _string("The caller's last name."),
+                    "phone": _string(
+                        "A contact phone number in E.164 form, e.g. +15551234567. Ask for "
+                        "one, or read back the number they are calling from to confirm it."
                     ),
+                    "email": _string("The caller's email, if they give one (optional)."),
                 },
-                required=["option", "patient_name"],
+                required=["option", "first_name", "last_name", "phone"],
             ),
         ),
         types.FunctionDeclaration(
@@ -364,7 +400,9 @@ def build_live_config(
     resumption_handle: str | None = None,
     voice: str = DEFAULT_VOICE,
     enable_affective_dialog: bool = True,
+    vad: VadTuning | None = None,
 ) -> types.LiveConnectConfig:
+    vad = vad or VadTuning()
     return types.LiveConnectConfig(
         response_modalities=[types.Modality.AUDIO],
         system_instruction=build_system_instruction(cfg, now=now),
@@ -380,12 +418,16 @@ def build_live_config(
         input_audio_transcription=types.AudioTranscriptionConfig(),
         output_audio_transcription=types.AudioTranscriptionConfig(),
         realtime_input_config=types.RealtimeInputConfig(
-            activity_handling=types.ActivityHandling.START_OF_ACTIVITY_INTERRUPTS,
+            activity_handling=(
+                types.ActivityHandling.START_OF_ACTIVITY_INTERRUPTS
+                if vad.interruptible
+                else types.ActivityHandling.NO_INTERRUPTION
+            ),
             automatic_activity_detection=types.AutomaticActivityDetection(
-                silence_duration_ms=END_OF_SPEECH_SILENCE_MS,
-                prefix_padding_ms=PREFIX_PADDING_MS,
-                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
-                start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
+                silence_duration_ms=vad.silence_ms,
+                prefix_padding_ms=vad.prefix_padding_ms,
+                end_of_speech_sensitivity=vad.end_sensitivity,
+                start_of_speech_sensitivity=vad.start_sensitivity,
             ),
         ),
         # Unbounded session length; without this, audio sessions stop at 15 minutes.

@@ -47,6 +47,8 @@ log = logging.getLogger(__name__)
 OFFERS_KEY = "offers"
 AUTHORISED_KEY = "authorised_appointment_ids"
 PATIENT_NAME_KEY = "patient_name"
+PATIENT_PHONE_KEY = "patient_phone"
+PATIENT_EMAIL_KEY = "patient_email"
 
 TRANSFER_RECOVERY = "Apologise briefly and offer to put the caller through to a person."
 
@@ -200,21 +202,41 @@ class ToolRouter:
                 "recovery": "Call find_slots again and read out the fresh options.",
             }
 
-        patient_name = args.get("patient_name") or ctx.state.get(PATIENT_NAME_KEY)
+        # First and last name are both required. The model sends first_name/last_name;
+        # patient_name is still accepted as a fallback (already-combined name).
+        first = (args.get("first_name") or "").strip()
+        last = (args.get("last_name") or "").strip()
+        if args.get("first_name") is not None or args.get("last_name") is not None:
+            if not first or not last:
+                return {
+                    "error": "both first and last name are required",
+                    "recovery": "Ask the caller for their first and last name.",
+                }
+            patient_name = f"{first} {last}"
+        else:
+            patient_name = args.get("patient_name") or ctx.state.get(PATIENT_NAME_KEY)
         if not patient_name:
             return {
-                "error": "patient_name is required",
-                "recovery": "Ask the caller for their full name.",
+                "error": "the caller's first and last name are required",
+                "recovery": "Ask the caller for their first and last name.",
             }
 
-        # Caller ID by default: making someone recite the number they are calling from
-        # is exactly the robotic experience this is meant to avoid.
-        phone = args.get("callback_phone") or ctx.caller_number
+        # A phone number is required. The model should ask for one (or read back the
+        # caller ID to confirm); caller ID and any earlier-given number are fallbacks.
+        phone = (
+            args.get("phone")
+            or args.get("callback_phone")
+            or ctx.state.get(PATIENT_PHONE_KEY)
+            or ctx.caller_number
+        )
         if not phone:
             return {
-                "error": "no phone number available",
-                "recovery": "Ask the caller for a callback number.",
+                "error": "a contact phone number is required",
+                "recovery": "Ask the caller for a contact phone number.",
             }
+
+        # Email is an optional second contact method.
+        email = (args.get("email") or ctx.state.get(PATIENT_EMAIL_KEY) or "").strip() or None
 
         try:
             booked = await book(
@@ -223,6 +245,7 @@ class ToolRouter:
                 secret=self.secret,
                 patient_name=patient_name,
                 patient_phone=phone,
+                patient_email=email,
                 now=self.clock(),
             )
         except SlotTaken:
@@ -239,6 +262,9 @@ class ToolRouter:
             }
 
         ctx.state[PATIENT_NAME_KEY] = patient_name
+        ctx.state[PATIENT_PHONE_KEY] = phone
+        if email:
+            ctx.state[PATIENT_EMAIL_KEY] = email
         # Consume the offers so the same slot cannot be booked twice in one call.
         ctx.state[OFFERS_KEY] = {}
         self._authorised(ctx).add(booked.appointment_id)

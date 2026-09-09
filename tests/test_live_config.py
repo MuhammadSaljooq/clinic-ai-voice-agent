@@ -94,11 +94,15 @@ def test_voice_is_configurable():
 
 # --- system instruction: the legally required parts ---------------------------
 
-def test_instruction_requires_ai_disclosure_in_the_greeting():
+def test_instruction_opens_with_a_greeting_and_keeps_reactive_honesty():
+    """Proactive "I'm an AI" disclosure was removed at the operator's request. A warm
+    opening greeting remains, and the agent still answers truthfully if asked whether it
+    is a bot (reactive honesty). Note: some jurisdictions require proactive disclosure --
+    that trade-off is the operator's to own."""
     text = prompt_text()
-    assert "ai" in text
-    assert "first" in text or "greeting" in text
-    assert "disclos" in text or "tell them" in text or "say" in text
+    assert "how to open" in text
+    assert "greeting" in text or "greet" in text
+    assert "truth" in text  # still tells the truth if a caller asks whether it's a bot
 
 
 def test_instruction_forbids_medical_advice():

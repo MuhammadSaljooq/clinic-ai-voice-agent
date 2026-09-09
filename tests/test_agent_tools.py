@@ -184,7 +184,47 @@ async def test_booking_without_a_name_asks_for_one(router):
     ctx = new_ctx()
     await route("find_slots", {"appointment_type": FOLLOW_UP}, ctx)
     result = await route("book_appointment", {"option": 1}, ctx)
-    assert "patient_name" in result["error"]
+    assert "name" in result["error"]
+
+
+async def test_booking_takes_first_last_phone_and_optional_email(router):
+    route, _, pool = router
+    ctx = new_ctx(caller="")  # no caller ID: the model must supply the phone
+    await route("find_slots", {"appointment_type": FOLLOW_UP}, ctx)
+    result = await route(
+        "book_appointment",
+        {"option": 1, "first_name": "Ada", "last_name": "Lovelace",
+         "phone": "+15551230000", "email": "ada@example.com"},
+        ctx,
+    )
+    assert result.get("booked") is True
+    row = await pool.fetchrow(
+        "SELECT name, phone, email FROM patients WHERE phone = $1", "+15551230000"
+    )
+    assert row["name"] == "Ada Lovelace"
+    assert row["email"] == "ada@example.com"
+
+
+async def test_booking_requires_both_first_and_last_name(router):
+    route, _, _ = router
+    ctx = new_ctx()
+    await route("find_slots", {"appointment_type": FOLLOW_UP}, ctx)
+    result = await route(
+        "book_appointment", {"option": 1, "first_name": "Ada", "phone": "+15551230001"}, ctx
+    )
+    assert "booked" not in result
+    assert "last" in result["error"]
+
+
+async def test_booking_requires_a_phone_number(router):
+    route, _, _ = router
+    ctx = new_ctx(caller="")  # no caller ID and no phone given
+    await route("find_slots", {"appointment_type": FOLLOW_UP}, ctx)
+    result = await route(
+        "book_appointment", {"option": 1, "first_name": "Ada", "last_name": "Lovelace"}, ctx
+    )
+    assert "booked" not in result
+    assert "phone" in result["error"]
 
 
 async def test_offers_are_consumed_so_one_call_cannot_book_the_same_slot_twice(router):
