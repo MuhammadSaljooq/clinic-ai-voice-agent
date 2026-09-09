@@ -71,6 +71,27 @@ Tests spin up/drop their own `clinic_test` database from `ADMIN_DATABASE_URL`
   seeds from `config.yaml`, and starts the reminder loop. This is why the whole app is
   testable without credentials or network.
 
+## Second agent: trailer rentals
+
+A parallel, independent voice agent lives alongside the clinic agent (added via
+`docs/superpowers/specs/2026-09-09-trailer-rental-agent-design.md`). It mirrors the clinic
+structure module-for-module, so learn one and you know the other:
+
+| Clinic | Trailer rental |
+|---|---|
+| `config.py` / `config.yaml` | `rental_config.py` / `trailer_config.yaml` |
+| `scheduling/` (slots, tokens, booking) | `rentals/` (availability, tokens, booking — **`daterange`** exclusion instead of `tstzrange`) |
+| `ai/live_config.py` | `ai/rental_live_config.py` |
+| `agent/tools.py` (`ToolRouter`) | `agent/rental_tools.py` (`RentalToolRouter`) |
+| clinic dashboard pages | `web/rental_dashboard.py` (its own shell + `/dashboard/trailer/*`) |
+
+The trailer agent is wired only when `trailer_config.yaml` exists (env `TRAILER_CONFIG`);
+`main.py` loads its config + connector at **build** time (so the console router can mount)
+and seeds inventory + builds its `RentalToolRouter` in the **lifespan** (needs the pool).
+It has its own voice (`TRAILER_GEMINI_VOICE`, default `Puck`) and reuses `SLOT_TOKEN_SECRET`
+for signing. The audio bridge (`CallSession`) and the browser test console
+(`render_test_console_body`) are shared; the clinic agent is otherwise untouched.
+
 ## Config, migrations, secrets
 
 - Business config lives in `config.yaml` (providers, hours, appointment types, FAQ,

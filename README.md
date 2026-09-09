@@ -131,6 +131,17 @@ console is server-rendered — no build step. Sections under `/dashboard`:
 The console is read-only except sending SMS and the test call — nothing here can change a
 booking, so a leaked session cannot cancel a patient's appointment.
 
+### Second agent: trailer rentals
+
+A separate, independent voice agent for a trailer-rental business ships alongside the
+clinic agent. It quotes and books trailer rentals over real per-unit availability (the same
+no-double-booking guarantee, on date ranges), with its own human "rental counter" persona,
+a distinct voice, its own tools, and a **"Trailer rental"** section in the console (Test
+agent, Inventory, Rentals — reachable from the clinic sidebar or at
+`/dashboard/trailer/test`). It's wired only when `trailer_config.yaml` is present
+(`TRAILER_CONFIG`), so clinic-only deployments are unaffected. Edit `trailer_config.yaml`
+to set the business, trailer types, daily rates, deposits, and unit counts.
+
 ### Voice tuning
 
 The agent's voice and turn-taking are env-configurable without touching code; startup
