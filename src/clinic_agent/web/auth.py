@@ -113,7 +113,7 @@ def render_login(
 ) -> str:
     import html
 
-    name = html.escape(cfg.clinic.name)
+    brand = "Next Higher Solutions"
     err = f'<div class="login-err" role="alert">{html.escape(error)}</div>' if error else ""
     if require_username:
         username_field = """
@@ -132,14 +132,13 @@ def render_login(
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Sign in · {name}</title>
+<title>Sign in · {brand}</title>
 <style>{theme.CSS}</style></head>
 <body>
 <div class="login-wrap">
   <div class="login-card">
     <div class="login-brand">
-      <div class="mark">{theme.icon("inbox")}</div>
-      <h1>{name}</h1>
+      <h1>{brand}</h1>
       <p>Operator console — sign in to continue</p>
     </div>
     <div class="card" style="padding:26px 24px">
