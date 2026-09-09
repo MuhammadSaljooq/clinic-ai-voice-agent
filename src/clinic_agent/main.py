@@ -123,6 +123,18 @@ def build_app():
     if not deps.dashboard_password:
         log.info("dashboard disabled (DASHBOARD_PASSWORD unset)")
 
+    # Load the trailer-rental config + connector at build time (no pool needed), so the
+    # console router can be mounted. Seeding + the tool router happen in the lifespan.
+    trailer_path = pathlib.Path(os.environ.get("TRAILER_CONFIG", "trailer_config.yaml"))
+    if trailer_path.exists():
+        from clinic_agent.ai.live_session import build_rental_connector
+        from clinic_agent.rental_config import load_rental_config
+
+        deps.trailer_cfg = load_rental_config(trailer_path)
+        deps.trailer_connect_gemini = build_rental_connector(deps.trailer_cfg, settings)
+    else:
+        log.info("trailer rental agent disabled (%s not found)", trailer_path)
+
     @contextlib.asynccontextmanager
     async def lifespan(_app):
         pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], min_size=2, max_size=10)
@@ -146,27 +158,22 @@ def build_app():
             mirror=mirror,
         )
 
-        # Second agent: the trailer-rental agent, wired only when a trailer config exists.
-        trailer_path = pathlib.Path(os.environ.get("TRAILER_CONFIG", "trailer_config.yaml"))
-        if trailer_path.exists():
+        # Second agent: seed inventory and build its tool router now that the pool exists.
+        # The config + connector were loaded at build time (deps.trailer_cfg), so the
+        # console router could be mounted; the tool router needs the pool.
+        if deps.trailer_cfg is not None:
             from clinic_agent.agent.rental_tools import RentalToolRouter
-            from clinic_agent.ai.live_session import build_rental_connector
             from clinic_agent.db.rental_seed import seed_rentals_from_config
-            from clinic_agent.rental_config import load_rental_config
 
-            trailer_cfg = load_rental_config(trailer_path)
-            await seed_rentals_from_config(pool, trailer_cfg)
-            deps.trailer_cfg = trailer_cfg
-            deps.trailer_connect_gemini = build_rental_connector(trailer_cfg, settings)
+            await seed_rentals_from_config(pool, deps.trailer_cfg)
             deps.trailer_tool_handler = RentalToolRouter(
-                pool=pool, cfg=trailer_cfg, secret=os.environ["SLOT_TOKEN_SECRET"], telnyx=telnyx
+                pool=pool, cfg=deps.trailer_cfg,
+                secret=os.environ["SLOT_TOKEN_SECRET"], telnyx=telnyx,
             )
             log.info(
                 "trailer rental agent wired: %s, %d trailer type(s)",
-                trailer_cfg.business.name, len(trailer_cfg.trailer_types),
+                deps.trailer_cfg.business.name, len(deps.trailer_cfg.trailer_types),
             )
-        else:
-            log.info("trailer rental agent disabled (%s not found)", trailer_path)
 
         async def on_finished(outcome):
             await record_call(pool, outcome)

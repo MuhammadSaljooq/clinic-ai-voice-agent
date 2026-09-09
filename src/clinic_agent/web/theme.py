@@ -461,6 +461,7 @@ def shell(
     <nav class="nav" aria-label="Sections">{''.join(links)}</nav>
     <div class="rail-foot">
       <div class="rail-status"><span class="dot {dot}"></span>{html.escape(status_text)}</div>
+      <a class="logout" href="/dashboard/trailer/test" style="text-decoration:none">{icon("calendar")}<span>Trailer rentals</span></a>
       <form method="post" action="/logout">
         <button class="logout" type="submit">{icon("logout")}<span>Sign out</span></button>
       </form>

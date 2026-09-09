@@ -246,6 +246,22 @@ def create_app(deps: AppDeps, *, lifespan: Any | None = None) -> FastAPI:
                 tool_handler_getter=lambda: deps.tool_handler,
             )
         )
+        # The trailer-rental console section, mounted lazily: the lifespan decides at
+        # request time whether the trailer agent is configured. The router is always
+        # mounted (its config comes from deps at build time), but the pages/WS degrade
+        # gracefully when the agent isn't wired.
+        from clinic_agent.web.rental_dashboard import build_rental_dashboard
+
+        if deps.trailer_cfg is not None:
+            app.include_router(
+                build_rental_dashboard(
+                    deps.trailer_cfg,
+                    lambda: deps.pool,
+                    deps.dashboard_password,
+                    connect_gemini=deps.trailer_connect_gemini,
+                    tool_handler_getter=lambda: deps.trailer_tool_handler,
+                )
+            )
 
     def _stream_authorised(token: str | None) -> bool:
         # No secret configured: accept anything (dev / backward compatible), but the
