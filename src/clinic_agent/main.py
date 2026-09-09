@@ -146,6 +146,28 @@ def build_app():
             mirror=mirror,
         )
 
+        # Second agent: the trailer-rental agent, wired only when a trailer config exists.
+        trailer_path = pathlib.Path(os.environ.get("TRAILER_CONFIG", "trailer_config.yaml"))
+        if trailer_path.exists():
+            from clinic_agent.agent.rental_tools import RentalToolRouter
+            from clinic_agent.ai.live_session import build_rental_connector
+            from clinic_agent.db.rental_seed import seed_rentals_from_config
+            from clinic_agent.rental_config import load_rental_config
+
+            trailer_cfg = load_rental_config(trailer_path)
+            await seed_rentals_from_config(pool, trailer_cfg)
+            deps.trailer_cfg = trailer_cfg
+            deps.trailer_connect_gemini = build_rental_connector(trailer_cfg, settings)
+            deps.trailer_tool_handler = RentalToolRouter(
+                pool=pool, cfg=trailer_cfg, secret=os.environ["SLOT_TOKEN_SECRET"], telnyx=telnyx
+            )
+            log.info(
+                "trailer rental agent wired: %s, %d trailer type(s)",
+                trailer_cfg.business.name, len(trailer_cfg.trailer_types),
+            )
+        else:
+            log.info("trailer rental agent disabled (%s not found)", trailer_path)
+
         async def on_finished(outcome):
             await record_call(pool, outcome)
 

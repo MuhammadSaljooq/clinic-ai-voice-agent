@@ -98,6 +98,11 @@ class AppDeps:
     # stranger who finds the endpoint cannot open a Gemini-billed session or spoof a
     # caller. Telnyx frames are unsigned, so the URL secret is the lever we have.
     stream_secret: str | None = None
+    # Second, independent agent: the trailer-rental console section is wired only when a
+    # trailer config is present. All three are filled in together or left None.
+    trailer_cfg: Any | None = None
+    trailer_connect_gemini: Callable[[str | None], Any] | None = None
+    trailer_tool_handler: ToolHandler | None = None
 
 
 class TelnyxWebSocketAdapter:
