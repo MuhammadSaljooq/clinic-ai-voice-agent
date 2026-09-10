@@ -20,6 +20,16 @@ from clinic_agent.config import ClinicConfig
 NATIVE_AUDIO_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
 FALLBACK_MODEL = "gemini-3.1-flash-live-preview"
 
+
+def is_native_audio(model: str) -> bool:
+    """Whether a model supports the native-audio-only features.
+
+    Affective dialog, thinking, and NON_BLOCKING function calling exist only on the
+    native-audio model; the faster half-cascade live model rejects a connection that
+    still carries that configuration. Everything model-specific keys off this.
+    """
+    return "native-audio" in model
+
 DEFAULT_VOICE = "Kore"
 
 # Compression keeps a call alive past the 15-minute uncompressed audio cap.
@@ -276,12 +286,18 @@ def _string(description: str, *, enum: list[str] | None = None) -> types.Schema:
     return types.Schema(type=types.Type.STRING, description=description, enum=enum)
 
 
-def build_tools(cfg: ClinicConfig, *, staff_enabled: bool = False) -> list[types.Tool]:
+def build_tools(
+    cfg: ClinicConfig, *, staff_enabled: bool = False, native_audio: bool = True
+) -> list[types.Tool]:
     """Declare the agent's tools.
 
     Appointment types and provider names are declared as enums drawn from config, so
     the model physically cannot request a service the clinic does not offer or a
     provider who does not exist.
+
+    On the faster half-cascade model (`native_audio=False`), the NON_BLOCKING/BLOCKING
+    behaviours are stripped -- that model rejects them. Reads then block the line
+    briefly during a lookup, the accepted trade for the faster, plainer voice.
     """
     type_names = [t.name for t in cfg.appointment_types]
     provider_names = [p.name for p in cfg.providers]
@@ -466,6 +482,10 @@ def build_tools(cfg: ClinicConfig, *, staff_enabled: bool = False) -> list[types
                 ),
             )
         )
+    if not native_audio:
+        # The half-cascade model rejects function-calling behaviour config; unset it.
+        for declaration in declarations:
+            declaration.behavior = None
     return [types.Tool(function_declarations=declarations)]
 
 
@@ -478,14 +498,19 @@ def build_live_config(
     enable_affective_dialog: bool = True,
     vad: VadTuning | None = None,
     staff_enabled: bool = False,
+    native_audio: bool = True,
 ) -> types.LiveConnectConfig:
     vad = vad or VadTuning()
     return types.LiveConnectConfig(
         response_modalities=[types.Modality.AUDIO],
         system_instruction=build_system_instruction(cfg, now=now, staff_enabled=staff_enabled),
-        tools=build_tools(cfg, staff_enabled=staff_enabled),
-        enable_affective_dialog=enable_affective_dialog,
-        thinking_config=types.ThinkingConfig(thinking_budget=THINKING_BUDGET),
+        tools=build_tools(cfg, staff_enabled=staff_enabled, native_audio=native_audio),
+        # Affective dialog and thinking are native-audio-only; the half-cascade model
+        # rejects a connection that still carries them, so they are unset there.
+        enable_affective_dialog=(enable_affective_dialog if native_audio else None),
+        thinking_config=(
+            types.ThinkingConfig(thinking_budget=THINKING_BUDGET) if native_audio else None
+        ),
         speech_config=types.SpeechConfig(
             voice_config=types.VoiceConfig(
                 prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice)

@@ -37,7 +37,7 @@ class TrailerTypeConfig(BaseModel):
     name: str
     description: str | None = None
     daily_rate: Decimal = Field(gt=0)
-    deposit: Decimal = Field(default=Decimal("0"), ge=0)
+    deposit: Decimal = Field(default=Decimal(0), ge=0)
     units: int = Field(gt=0)
 
 

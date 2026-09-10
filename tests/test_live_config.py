@@ -14,12 +14,14 @@ import re
 from google.genai import types
 
 from clinic_agent.ai.live_config import (
+    FALLBACK_MODEL,
     NATIVE_AUDIO_MODEL,
     READ_TOOLS,
     WRITE_TOOLS,
     build_live_config,
     build_system_instruction,
     build_tools,
+    is_native_audio,
 )
 from clinic_agent.ai.provider import ProviderSettings, client_kwargs
 from clinic_agent.config import load_config
@@ -185,6 +187,30 @@ def test_write_tools_are_blocking_so_nothing_is_confirmed_before_it_commits():
     declarations = {d.name: d for t in build_tools(CFG) for d in t.function_declarations}
     for name in WRITE_TOOLS:
         assert declarations[name].behavior == types.Behavior.BLOCKING, name
+
+
+# --- faster (half-cascade) model --------------------------------------------------
+
+def test_the_two_models_are_classified_correctly():
+    assert is_native_audio(NATIVE_AUDIO_MODEL) is True
+    assert is_native_audio(FALLBACK_MODEL) is False
+
+
+def test_native_audio_config_carries_the_native_only_features():
+    cfg = build_live_config(CFG)  # native by default
+    assert cfg.enable_affective_dialog is True
+    assert cfg.thinking_config is not None
+    behaviours = {d.name: d.behavior for t in cfg.tools for d in t.function_declarations}
+    assert behaviours["find_slots"] == types.Behavior.NON_BLOCKING
+
+
+def test_half_cascade_config_strips_the_native_only_features():
+    """The faster model rejects a connection that still carries them."""
+    cfg = build_live_config(CFG, native_audio=False)
+    assert cfg.enable_affective_dialog is None
+    assert cfg.thinking_config is None
+    behaviours = [d.behavior for t in cfg.tools for d in t.function_declarations]
+    assert all(b is None for b in behaviours)
 
 
 def test_appointment_type_argument_is_constrained_to_configured_types():

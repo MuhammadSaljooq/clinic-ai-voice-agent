@@ -7,6 +7,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from asyncpg.exceptions import ExclusionViolationError
 
 from clinic_agent.db.rental_seed import seed_rentals_from_config
 from clinic_agent.rental_config import load_rental_config
@@ -58,6 +59,6 @@ async def test_exclusion_constraint_blocks_double_booking_a_unit(rental_db):
         )
 
     await rent(date(2026, 10, 5), date(2026, 10, 7))
-    with pytest.raises(Exception):  # ExclusionViolationError
+    with pytest.raises(ExclusionViolationError):
         await rent(date(2026, 10, 6), date(2026, 10, 8))   # overlaps
     await rent(date(2026, 10, 8), date(2026, 10, 9))        # next day is fine

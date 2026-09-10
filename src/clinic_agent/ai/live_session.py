@@ -19,6 +19,7 @@ from clinic_agent.ai.live_config import (
     NATIVE_AUDIO_MODEL,
     VadTuning,
     build_live_config,
+    is_native_audio,
 )
 from clinic_agent.ai.provider import ProviderSettings, build_client
 from clinic_agent.config import ClinicConfig
@@ -98,9 +99,11 @@ def build_gemini_connector(
     vad = vad or vad_from_env()
     if enable_affective_dialog is None:
         enable_affective_dialog = _env_bool(os.environ.get("AI_ENABLE_AFFECTIVE_DIALOG"), True)
+    native_audio = is_native_audio(model)
     log.info(
-        "voice: model=%s voice=%s turn-taking silence=%dms prefix=%dms end=%s affective=%s",
-        model, voice, vad.silence_ms, vad.prefix_padding_ms, vad.end_sensitivity, enable_affective_dialog,
+        "voice: model=%s voice=%s native_audio=%s turn-taking silence=%dms prefix=%dms end=%s affective=%s",
+        model, voice, native_audio, vad.silence_ms, vad.prefix_padding_ms, vad.end_sensitivity,
+        enable_affective_dialog,
     )
 
     staff_enabled = bool(os.environ.get("STAFF_PIN"))
@@ -115,6 +118,7 @@ def build_gemini_connector(
                 vad=vad,
                 enable_affective_dialog=enable_affective_dialog,
                 staff_enabled=staff_enabled,
+                native_audio=native_audio,
             ),
         )
 
@@ -140,7 +144,8 @@ def build_rental_connector(
     vad = vad or vad_from_env()
     if enable_affective_dialog is None:
         enable_affective_dialog = _env_bool(os.environ.get("AI_ENABLE_AFFECTIVE_DIALOG"), True)
-    log.info("trailer voice: model=%s voice=%s", model, voice)
+    native_audio = is_native_audio(model)
+    log.info("trailer voice: model=%s voice=%s native_audio=%s", model, voice, native_audio)
 
     def connect(resumption_handle: str | None):
         return client.aio.live.connect(
@@ -151,6 +156,7 @@ def build_rental_connector(
                 voice=voice,
                 vad=vad,
                 enable_affective_dialog=enable_affective_dialog,
+                native_audio=native_audio,
             ),
         )
 

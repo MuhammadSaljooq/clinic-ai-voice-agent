@@ -109,9 +109,10 @@ async def test_username_and_password_both_required_when_username_configured():
     FORM = {"content-type": "application/x-www-form-urlencoded"}
     app = FastAPI()
     app.include_router(build_auth_router(CFG, PW, username="adrian@nhs.com"))
+    guard = require_session(PW)
 
     @app.get("/guarded")
-    async def guarded(_=Depends(require_session(PW))):
+    async def guarded(_=Depends(guard)):
         return {"ok": True}
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:

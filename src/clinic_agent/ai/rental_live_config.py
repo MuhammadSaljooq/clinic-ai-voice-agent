@@ -112,7 +112,7 @@ def _string(description: str, *, enum: list[str] | None = None) -> types.Schema:
     return types.Schema(type=types.Type.STRING, description=description, enum=enum)
 
 
-def build_rental_tools(cfg: RentalConfig) -> list[types.Tool]:
+def build_rental_tools(cfg: RentalConfig, *, native_audio: bool = True) -> list[types.Tool]:
     type_names = [t.name for t in cfg.trailer_types]
     declarations = [
         types.FunctionDeclaration(
@@ -215,6 +215,10 @@ def build_rental_tools(cfg: RentalConfig) -> list[types.Tool]:
             ),
         ),
     ]
+    if not native_audio:
+        # The half-cascade model rejects function-calling behaviour config; unset it.
+        for declaration in declarations:
+            declaration.behavior = None
     return [types.Tool(function_declarations=declarations)]
 
 
@@ -226,14 +230,17 @@ def build_rental_live_config(
     voice: str = DEFAULT_VOICE,
     enable_affective_dialog: bool = True,
     vad: VadTuning | None = None,
+    native_audio: bool = True,
 ) -> types.LiveConnectConfig:
     vad = vad or VadTuning()
     return types.LiveConnectConfig(
         response_modalities=[types.Modality.AUDIO],
         system_instruction=build_rental_system_instruction(cfg, now=now),
-        tools=build_rental_tools(cfg),
-        enable_affective_dialog=enable_affective_dialog,
-        thinking_config=types.ThinkingConfig(thinking_budget=THINKING_BUDGET),
+        tools=build_rental_tools(cfg, native_audio=native_audio),
+        enable_affective_dialog=(enable_affective_dialog if native_audio else None),
+        thinking_config=(
+            types.ThinkingConfig(thinking_budget=THINKING_BUDGET) if native_audio else None
+        ),
         speech_config=types.SpeechConfig(
             voice_config=types.VoiceConfig(
                 prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice)
