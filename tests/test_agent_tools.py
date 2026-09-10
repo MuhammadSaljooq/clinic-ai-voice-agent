@@ -205,6 +205,23 @@ async def test_booking_takes_first_last_phone_and_optional_email(router):
     assert row["email"] == "ada@example.com"
 
 
+async def test_booking_stores_the_reason_for_the_visit(router):
+    route, _, pool = router
+    ctx = new_ctx(caller="")
+    await route("find_slots", {"appointment_type": FOLLOW_UP}, ctx)
+    result = await route(
+        "book_appointment",
+        {"option": 1, "first_name": "Ada", "last_name": "Lovelace",
+         "phone": "+15551230000", "reason": "persistent cough for a week"},
+        ctx,
+    )
+    assert result.get("booked") is True
+    stored = await pool.fetchval(
+        "SELECT reason FROM appointments WHERE id = $1", result["appointment_id"]
+    )
+    assert stored == "persistent cough for a week"
+
+
 async def test_booking_requires_both_first_and_last_name(router):
     route, _, _ = router
     ctx = new_ctx()

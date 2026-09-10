@@ -320,8 +320,8 @@ async def test_the_agent_is_prompted_to_greet_when_the_call_connects():
     await run_session([telnyx_start(), telnyx_stop()], [gemini])
 
     assert len(gemini.client_content) == 1
-    nudge = str(gemini.client_content[0])
-    assert "greet" in nudge.lower()
+    nudge = str(gemini.client_content[0]).lower()
+    assert "911" in nudge and "help" in nudge  # prompts the opening (thanks + 911 + how can I help)
 
 
 async def test_the_greeting_is_not_repeated_after_a_reconnect():

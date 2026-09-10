@@ -52,7 +52,8 @@ TRANSFER_TOOL = "transfer_to_human"
 # happens.
 GREETING_NUDGE = (
     "(The phone call has just connected and the caller is listening. "
-    "Greet them now warmly, in one short sentence, and ask how you can help.)"
+    "Open now as instructed: thank them for calling and name the clinic, give the 911 "
+    "emergency line, pause briefly, then ask how you can help.)"
 )
 
 # How long to let the Gemini loop finish after the call ends before giving up on it.

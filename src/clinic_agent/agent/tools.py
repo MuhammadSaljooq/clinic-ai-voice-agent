@@ -237,6 +237,8 @@ class ToolRouter:
 
         # Email is an optional second contact method.
         email = (args.get("email") or ctx.state.get(PATIENT_EMAIL_KEY) or "").strip() or None
+        # Reason for the visit / symptoms, noted for the clinical team.
+        reason = (args.get("reason") or "").strip() or None
 
         try:
             booked = await book(
@@ -246,6 +248,7 @@ class ToolRouter:
                 patient_name=patient_name,
                 patient_phone=phone,
                 patient_email=email,
+                reason=reason,
                 now=self.clock(),
             )
         except SlotTaken:

@@ -128,6 +128,7 @@ async def book(
     patient_name: str,
     patient_phone: str,
     patient_email: str | None = None,
+    reason: str | None = None,
     source: str = "voice_agent",
     now: datetime | None = None,
 ) -> Booked:
@@ -164,9 +165,9 @@ async def book(
                 INSERT INTO appointments (
                     provider_id, appointment_type_id, patient_id,
                     starts_at, ends_at, buffer_before_min, buffer_after_min,
-                    blocked_range, source
+                    blocked_range, source, reason
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, tstzrange($8, $9), $10)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, tstzrange($8, $9), $10, $11)
                 RETURNING id
                 """,
                 slot.provider_id,
@@ -179,6 +180,7 @@ async def book(
                 blocked_start,
                 blocked_end,
                 source,
+                reason,
             )
         except (
             asyncpg.exceptions.ExclusionViolationError,
