@@ -205,6 +205,31 @@ async def test_booking_takes_first_last_phone_and_optional_email(router):
     assert row["email"] == "ada@example.com"
 
 
+async def test_request_callback_queues_the_caller(router):
+    route, _, pool = router
+    ctx = new_ctx(caller="")
+    res = await route(
+        "request_callback",
+        {"first_name": "Ada", "last_name": "Lovelace", "phone": "+15551230000",
+         "reason": "wants the soonest follow-up"},
+        ctx,
+    )
+    assert res.get("queued") is True
+    row = await pool.fetchrow(
+        "SELECT name, phone, reason, status::text AS status FROM callback_requests WHERE phone=$1",
+        "+15551230000",
+    )
+    assert row["name"] == "Ada Lovelace"
+    assert row["status"] == "waiting"
+
+
+async def test_request_callback_needs_a_phone(router):
+    route, _, _ = router
+    res = await route("request_callback", {"first_name": "Ada", "last_name": "L"}, new_ctx(caller=""))
+    assert "queued" not in res
+    assert "phone" in res["error"]
+
+
 async def test_booking_stores_the_reason_for_the_visit(router):
     route, _, pool = router
     ctx = new_ctx(caller="")

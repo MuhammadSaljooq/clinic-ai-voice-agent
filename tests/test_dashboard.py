@@ -176,6 +176,23 @@ async def test_reminders_page_shows_the_recorded_body(dash):
     assert "reminder of your appointment tomorrow at 9am" in body
 
 
+async def test_callbacks_page_lists_and_marks_contacted(dash):
+    client, pool, _cfg, _t = dash
+    cb = await pool.fetchval(
+        "INSERT INTO callback_requests (name, phone, reason) VALUES"
+        " ('Ada Lovelace','+15550100','soonest follow-up') RETURNING id"
+    )
+    body = (await client.get("/dashboard/callbacks")).text
+    assert "Ada Lovelace" in body
+    assert "soonest follow-up" in body
+    assert "waiting" in body
+
+    r = await client.post(f"/dashboard/callbacks/{cb}/contacted")
+    assert r.status_code == 303
+    status = await pool.fetchval("SELECT status::text FROM callback_requests WHERE id=$1", cb)
+    assert status == "contacted"
+
+
 async def test_the_dry_run_banner_warns_that_nothing_is_being_sent(dash):
     client, _pool, cfg, _t = dash
     cfg.reminders.enabled = True

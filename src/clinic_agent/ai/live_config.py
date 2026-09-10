@@ -78,6 +78,7 @@ WRITE_TOOLS = (
     "reschedule_appointment",
     "cancel_appointment",
     "transfer_to_human",
+    "request_callback",
 )
 
 PARTS_OF_DAY = ("morning", "afternoon", "evening")
@@ -245,6 +246,12 @@ IF A TIME GETS TAKEN WHILE YOU ARE TALKING
 It happens. Say so lightly -- "ah, that one's just gone" -- search again, and offer
 the new times. Never tell someone an appointment is booked until it actually is.
 
+IF NOTHING WORKS, OFFER A CALLBACK
+If nothing suitable is available, or the caller would rather not wait, offer a callback:
+"I can pop you on our callback list and someone will call you back as soon as a spot opens
+up -- would that help?" If they say yes, take their first and last name and a phone number,
+add them to the callback list, then confirm someone will call them back.
+
 ENDING THE CALL
 Confirm what has been arranged in one sentence, ask if there is anything else, then
 say goodbye warmly and briefly. Do not summarise at length.
@@ -400,6 +407,25 @@ def build_tools(cfg: ClinicConfig) -> list[types.Tool]:
                 type=types.Type.OBJECT,
                 properties={"reason": _string("Why the call is being transferred.")},
                 required=["reason"],
+            ),
+        ),
+        types.FunctionDeclaration(
+            name="request_callback",
+            behavior=types.Behavior.BLOCKING,
+            description=(
+                "Add the caller to the call-back queue when no appointment time works or "
+                "they would rather be called back. Take their first name, last name and a "
+                "phone number first."
+            ),
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "first_name": _string("The caller's first name."),
+                    "last_name": _string("The caller's last name."),
+                    "phone": _string("A callback phone number in E.164 form."),
+                    "reason": _string("Why they're calling / what they need (optional)."),
+                },
+                required=["first_name", "last_name", "phone"],
             ),
         ),
     ]

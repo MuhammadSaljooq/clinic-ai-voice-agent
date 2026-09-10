@@ -371,6 +371,7 @@ _NAV = [
     ("calls", "/dashboard", "Calls", "phone"),
     ("appointments", "/dashboard/appointments", "Appointments", "calendar"),
     ("reminders", "/dashboard/reminders", "Reminders", "bell"),
+    ("callbacks", "/dashboard/callbacks", "Callbacks", "phone"),
     ("test", "/dashboard/test", "Test agent", "mic"),
 ]
 

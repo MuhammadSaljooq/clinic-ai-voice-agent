@@ -37,6 +37,7 @@ STATUS_CLASS = {
     "reconnect_limit": "warn",
     "failed": "bad", "blocked": "bad", "unsupported_codec": "bad",
     "cancelled": "mute", "skipped_opted_out": "mute", "no_show": "mute", "completed": "mute",
+    "waiting": "warn", "contacted": "ok", "closed": "mute",
 }
 
 
@@ -533,6 +534,58 @@ def build_dashboard(
         )
         flag = "sent" if result.ok else ("blocked" if result.reason and "opted out" in result.reason else "failed")
         return RedirectResponse(f"{dest}&sent={flag}", status_code=303)
+
+    # --- call-back queue ------------------------------------------------------
+
+    @router.get("/callbacks", response_class=HTMLResponse)
+    async def callbacks(_=guard) -> HTMLResponse:
+        pool = pool_getter()
+        if pool is None:
+            return _no_db("Callbacks", "callbacks")
+        rows = await pool.fetch(
+            """
+            SELECT id, name, phone, reason, status::text AS status, created_at
+            FROM callback_requests
+            ORDER BY (status = 'waiting') DESC, created_at DESC
+            LIMIT 100
+            """
+        )
+        if not rows:
+            body = empty_state("phone", "No callbacks", "When a caller asks for a callback, they land here for staff to work through.")
+        else:
+            trs = []
+            for r in rows:
+                action = ""
+                if r["status"] == "waiting":
+                    action = (
+                        f'<form method="post" action="/dashboard/callbacks/{r["id"]}/contacted" style="margin:0">'
+                        f'<button class="btn btn-ghost" type="submit" style="padding:5px 12px">Mark contacted</button></form>'
+                    )
+                trs.append(
+                    "<tr>"
+                    f'<td class="mono">{local(r["created_at"], cfg)}</td>'
+                    f"<td>{html.escape(r['name'] or '-')}</td>"
+                    f'<td class="mono">{html.escape(r["phone"])}</td>'
+                    f'<td style="max-width:36ch">{html.escape(r["reason"] or "-")}</td>'
+                    f"<td>{_badge(r['status'])}</td>"
+                    f"<td>{action}</td>"
+                    "</tr>"
+                )
+            body = _table(["Requested", "Name", "Phone", "Reason", "Status", ""], trs)
+        return HTMLResponse(shell("Callbacks", "callbacks", cfg, body,
+                                  lead="Callback requests, waiting first",
+                                  inbox_count=await _inbox_count(pool)))
+
+    @router.post("/callbacks/{callback_id}/contacted")
+    async def mark_contacted(callback_id: int, _=guard):
+        pool = pool_getter()
+        if pool is not None:
+            await pool.execute(
+                "UPDATE callback_requests SET status = 'contacted', updated_at = now()"
+                " WHERE id = $1 AND status = 'waiting'",
+                callback_id,
+            )
+        return RedirectResponse("/dashboard/callbacks", status_code=303)
 
     # --- test the agent (browser voice) ---------------------------------------
 

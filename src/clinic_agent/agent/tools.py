@@ -78,6 +78,7 @@ class ToolRouter:
             "cancel_appointment": self._cancel,
             "answer_faq": self._answer_faq,
             "transfer_to_human": self._transfer,
+            "request_callback": self._request_callback,
         }.get(name)
 
         if handler is None:
@@ -370,6 +371,30 @@ class ToolRouter:
             }
         await self._mirror("cancelled", appointment_id)
         return {"cancelled": True, "appointment_id": appointment_id}
+
+    async def _request_callback(self, args: dict, ctx: ToolContext) -> dict:
+        first = (args.get("first_name") or "").strip()
+        last = (args.get("last_name") or "").strip()
+        name = f"{first} {last}".strip() or ctx.state.get(PATIENT_NAME_KEY) or None
+        phone = (args.get("phone") or ctx.state.get(PATIENT_PHONE_KEY) or ctx.caller_number)
+        if not phone:
+            return {
+                "error": "a phone number is required for a callback",
+                "recovery": "Ask the caller for a number to call them back on.",
+            }
+        reason = (args.get("reason") or "").strip() or None
+        await self.pool.execute(
+            "INSERT INTO callback_requests (name, phone, reason) VALUES ($1, $2, $3)",
+            name, phone, reason,
+        )
+        if name:
+            ctx.state[PATIENT_NAME_KEY] = name
+        ctx.state[PATIENT_PHONE_KEY] = phone
+        return {
+            "queued": True,
+            "say": "Confirm they're on the callback list and someone will call them back "
+                   "as soon as a spot opens up.",
+        }
 
     async def _answer_faq(self, args: dict, ctx: ToolContext) -> dict:
         entry = match_faq(str(args.get("question", "")), self.cfg.faq)
