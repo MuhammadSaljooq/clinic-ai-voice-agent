@@ -19,10 +19,11 @@ apologise and recover mid-sentence instead of the call falling over.
 
 from __future__ import annotations
 
+import hmac
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import asyncpg
@@ -67,6 +68,9 @@ class ToolRouter:
     # Optional: when absent, bookings simply are not mirrored. The mirror must never
     # be able to affect whether a booking succeeds.
     mirror: Any | None = None
+    # Optional staff PIN. When set, `list_schedule` becomes available to callers who
+    # can quote it -- the schedule is patient PII, so it is never readable without it.
+    staff_pin: str | None = None
     clock: Callable[[], datetime] = lambda: datetime.now(UTC)
 
     async def __call__(self, name: str, args: dict, ctx: ToolContext) -> dict:
@@ -79,6 +83,7 @@ class ToolRouter:
             "answer_faq": self._answer_faq,
             "transfer_to_human": self._transfer,
             "request_callback": self._request_callback,
+            "list_schedule": self._list_schedule,
         }.get(name)
 
         if handler is None:
@@ -394,6 +399,62 @@ class ToolRouter:
             "queued": True,
             "say": "Confirm they're on the callback list and someone will call them back "
                    "as soon as a spot opens up.",
+        }
+
+    async def _list_schedule(self, args: dict, ctx: ToolContext) -> dict:
+        """Read a day's booked appointments -- STAFF ONLY, gated behind the PIN.
+
+        The schedule is patient PII, so this refuses unless the caller quotes the staff
+        PIN. `hmac.compare_digest` keeps the check constant-time; the PIN never appears
+        in any offer or prompt.
+        """
+        pin = str(args.get("pin") or "")
+        if not self.staff_pin or not hmac.compare_digest(pin, self.staff_pin):
+            return {
+                "error": "the staff PIN is missing or incorrect",
+                "recovery": (
+                    "Do not read out any schedule. Ask for the staff PIN; if they cannot "
+                    "give it, explain this is staff-only and offer to help as a patient."
+                ),
+            }
+
+        # Default to today (clinic-local). A bad/absent date falls back to today rather
+        # than erroring mid-call.
+        day = self.clock().astimezone(self.cfg.tz).date()
+        if args.get("date"):
+            try:
+                day = date.fromisoformat(str(args["date"]))
+            except ValueError:
+                pass
+
+        day_start = datetime(day.year, day.month, day.day, tzinfo=self.cfg.tz)
+        day_end = day_start + timedelta(days=1)
+        rows = await self.pool.fetch(
+            """
+            SELECT a.starts_at, p.name AS patient, pr.name AS provider,
+                   t.name AS appointment_type
+            FROM appointments a
+            JOIN patients p ON p.id = a.patient_id
+            JOIN providers pr ON pr.id = a.provider_id
+            JOIN appointment_types t ON t.id = a.appointment_type_id
+            WHERE a.status = 'booked'
+              AND a.starts_at >= $1 AND a.starts_at < $2
+            ORDER BY a.starts_at
+            """,
+            day_start, day_end,
+        )
+        return {
+            "date": day.isoformat(),
+            "count": len(rows),
+            "appointments": [
+                {
+                    "when": spoken_datetime(r["starts_at"], self.cfg.tz),
+                    "patient": r["patient"],
+                    "provider": r["provider"],
+                    "type": r["appointment_type"],
+                }
+                for r in rows
+            ],
         }
 
     async def _answer_faq(self, args: dict, ctx: ToolContext) -> dict:

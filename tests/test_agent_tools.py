@@ -230,6 +230,58 @@ async def test_request_callback_needs_a_phone(router):
     assert "phone" in res["error"]
 
 
+# --- staff schedule (PIN-gated) -----------------------------------------------
+
+STAFF_PIN = "4242"
+
+
+@pytest.fixture
+async def staff_router(pool):
+    cfg = load_config(REPO / "config.yaml")
+    await seed_from_config(pool, cfg)
+    return (
+        ToolRouter(
+            pool=pool, cfg=cfg, secret=SECRET, staff_pin=STAFF_PIN,
+            clock=lambda: MONDAY_4AM,
+        ),
+        pool,
+    )
+
+
+async def _book_one(route, ctx) -> None:
+    await route("find_slots", {"appointment_type": FOLLOW_UP}, ctx)
+    await route("book_appointment", {"option": 1, "patient_name": "Ada Lovelace"}, ctx)
+
+
+async def test_list_schedule_reads_the_day_for_a_caller_with_the_pin(staff_router):
+    route, _ = staff_router
+    await _book_one(route, new_ctx())
+
+    res = await route("list_schedule", {"pin": STAFF_PIN, "date": "2026-09-14"}, new_ctx())
+
+    assert res["count"] == 1
+    assert res["appointments"][0]["patient"] == "Ada Lovelace"
+
+
+async def test_list_schedule_refuses_a_wrong_pin_and_leaks_nothing(staff_router):
+    route, _ = staff_router
+    await _book_one(route, new_ctx())
+
+    res = await route("list_schedule", {"pin": "0000", "date": "2026-09-14"}, new_ctx())
+
+    assert "error" in res
+    assert "appointments" not in res
+    assert "Ada" not in str(res)
+
+
+async def test_list_schedule_is_disabled_when_no_staff_pin_is_configured(router):
+    """Without STAFF_PIN, the tool is dead even if the model somehow calls it."""
+    route, _, _ = router  # the default router has no staff_pin
+    res = await route("list_schedule", {"pin": "anything"}, new_ctx())
+    assert "error" in res
+    assert "appointments" not in res
+
+
 async def test_booking_stores_the_reason_for_the_visit(router):
     route, _, pool = router
     ctx = new_ctx(caller="")

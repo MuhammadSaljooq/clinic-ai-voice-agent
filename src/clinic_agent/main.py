@@ -157,6 +157,7 @@ def build_app():
             secret=os.environ["SLOT_TOKEN_SECRET"],
             telnyx=telnyx,
             mirror=mirror,
+            staff_pin=os.environ.get("STAFF_PIN") or None,
         )
 
         # Second agent: seed inventory and build its tool router now that the pool exists.

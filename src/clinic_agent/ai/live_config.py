@@ -84,7 +84,9 @@ WRITE_TOOLS = (
 PARTS_OF_DAY = ("morning", "afternoon", "evening")
 
 
-def build_system_instruction(cfg: ClinicConfig, *, now: datetime | None = None) -> str:
+def build_system_instruction(
+    cfg: ClinicConfig, *, now: datetime | None = None, staff_enabled: bool = False
+) -> str:
     provider_lines = []
     for provider in cfg.providers:
         hours = ", ".join(
@@ -123,6 +125,17 @@ def build_system_instruction(cfg: ClinicConfig, *, now: datetime | None = None) 
         reminder_line = (
             "   Do NOT promise a text reminder -- reminders are not switched on yet."
         )
+
+    staff_section = ""
+    if staff_enabled:
+        staff_section = """
+
+STAFF SCHEDULE ACCESS
+Clinic staff can ask what is on the schedule ("what have I got booked today?"). That is
+private patient information, so protect it: first ask for the staff PIN. Only after they
+give the correct PIN, use list_schedule to tell them what is booked for the day they ask
+about. If the PIN is wrong or they will not give one, do not read the schedule -- offer to
+transfer them instead. Never read the schedule to anyone without the PIN."""
 
     return f"""You are the receptionist answering the phone for {cfg.clinic.name}.
 You are not a chatbot reading a script. You are the voice someone hears when they
@@ -251,6 +264,7 @@ If nothing suitable is available, or the caller would rather not wait, offer a c
 "I can pop you on our callback list and someone will call you back as soon as a spot opens
 up -- would that help?" If they say yes, take their first and last name and a phone number,
 add them to the callback list, then confirm someone will call them back.
+{staff_section}
 
 ENDING THE CALL
 Confirm what has been arranged in one sentence, ask if there is anything else, then
@@ -262,7 +276,7 @@ def _string(description: str, *, enum: list[str] | None = None) -> types.Schema:
     return types.Schema(type=types.Type.STRING, description=description, enum=enum)
 
 
-def build_tools(cfg: ClinicConfig) -> list[types.Tool]:
+def build_tools(cfg: ClinicConfig, *, staff_enabled: bool = False) -> list[types.Tool]:
     """Declare the agent's tools.
 
     Appointment types and provider names are declared as enums drawn from config, so
@@ -429,6 +443,29 @@ def build_tools(cfg: ClinicConfig) -> list[types.Tool]:
             ),
         ),
     ]
+    if staff_enabled:
+        declarations.append(
+            types.FunctionDeclaration(
+                name="list_schedule",
+                behavior=types.Behavior.NON_BLOCKING,
+                description=(
+                    "STAFF ONLY. List the appointments booked for a given day. Requires the "
+                    "staff PIN; never call this without the caller giving the correct PIN, as "
+                    "it returns private patient information."
+                ),
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "pin": _string("The staff PIN the caller gave."),
+                        "date": _string(
+                            "The day to list, as YYYY-MM-DD, worked out from the current "
+                            "date above. Omit for today."
+                        ),
+                    },
+                    required=["pin"],
+                ),
+            )
+        )
     return [types.Tool(function_declarations=declarations)]
 
 
@@ -440,12 +477,13 @@ def build_live_config(
     voice: str = DEFAULT_VOICE,
     enable_affective_dialog: bool = True,
     vad: VadTuning | None = None,
+    staff_enabled: bool = False,
 ) -> types.LiveConnectConfig:
     vad = vad or VadTuning()
     return types.LiveConnectConfig(
         response_modalities=[types.Modality.AUDIO],
-        system_instruction=build_system_instruction(cfg, now=now),
-        tools=build_tools(cfg),
+        system_instruction=build_system_instruction(cfg, now=now, staff_enabled=staff_enabled),
+        tools=build_tools(cfg, staff_enabled=staff_enabled),
         enable_affective_dialog=enable_affective_dialog,
         thinking_config=types.ThinkingConfig(thinking_budget=THINKING_BUDGET),
         speech_config=types.SpeechConfig(

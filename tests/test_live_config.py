@@ -147,6 +147,32 @@ def test_all_expected_tools_are_declared():
     assert names == set(READ_TOOLS) | set(WRITE_TOOLS)
 
 
+def test_list_schedule_is_absent_unless_staff_access_is_enabled():
+    """The schedule is patient PII: the tool must not even exist without a staff PIN."""
+    names = {d.name for tool in build_tools(CFG) for d in tool.function_declarations}
+    assert "list_schedule" not in names
+
+
+def test_staff_mode_declares_a_pin_gated_read_only_schedule_tool():
+    declarations = {
+        d.name: d
+        for tool in build_tools(CFG, staff_enabled=True)
+        for d in tool.function_declarations
+    }
+    assert "list_schedule" in declarations
+    tool = declarations["list_schedule"]
+    assert tool.behavior == types.Behavior.NON_BLOCKING  # reads never block the line
+    assert "pin" in tool.parameters.required
+
+
+def test_staff_mode_prompt_tells_the_agent_to_demand_the_pin():
+    text = build_system_instruction(CFG, staff_enabled=True)
+    assert "STAFF SCHEDULE ACCESS" in text
+    assert "PIN" in text
+    # And the section is silent when the feature is off.
+    assert "STAFF SCHEDULE ACCESS" not in build_system_instruction(CFG)
+
+
 def test_read_tools_are_non_blocking_so_the_line_never_goes_silent():
     declarations = {d.name: d for t in build_tools(CFG) for d in t.function_declarations}
     for name in READ_TOOLS:

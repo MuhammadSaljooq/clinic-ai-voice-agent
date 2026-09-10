@@ -103,6 +103,8 @@ def build_gemini_connector(
         model, voice, vad.silence_ms, vad.prefix_padding_ms, vad.end_sensitivity, enable_affective_dialog,
     )
 
+    staff_enabled = bool(os.environ.get("STAFF_PIN"))
+
     def connect(resumption_handle: str | None):
         return client.aio.live.connect(
             model=model,
@@ -112,6 +114,7 @@ def build_gemini_connector(
                 voice=voice,
                 vad=vad,
                 enable_affective_dialog=enable_affective_dialog,
+                staff_enabled=staff_enabled,
             ),
         )
 
