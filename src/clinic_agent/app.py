@@ -106,6 +106,11 @@ class AppDeps:
     trailer_cfg: Any | None = None
     trailer_connect_gemini: Callable[[str | None], Any] | None = None
     trailer_tool_handler: ToolHandler | None = None
+    # Third, independent agent: the handyman (Task Titan) console, wired only when a
+    # handyman config is present. Same all-or-nothing rule.
+    handyman_cfg: Any | None = None
+    handyman_connect_gemini: Callable[[str | None], Any] | None = None
+    handyman_tool_handler: ToolHandler | None = None
 
 
 class TelnyxWebSocketAdapter:
@@ -243,13 +248,26 @@ def create_app(deps: AppDeps, *, lifespan: Any | None = None) -> FastAPI:
         # pool, telnyx and the sender number are resolved lazily: the lifespan fills
         # them in after the app is built. The login page and session live at the app
         # root; the console under /dashboard.
+        # The login workspace picker: clinic always, plus each configured agent. With one
+        # workspace there's no picker; with 2+ the operator chooses which console to enter.
+        from clinic_agent.web.auth import Workspace
+
+        workspaces = [Workspace("clinic", deps.cfg.clinic.name, "/dashboard/inbox", "/dashboard", "inbox")]
+        if deps.trailer_cfg is not None:
+            workspaces.append(Workspace(
+                "trailer", deps.trailer_cfg.business.name,
+                "/dashboard/trailer/test", "/dashboard/trailer", "calendar",
+            ))
+        if deps.handyman_cfg is not None:
+            workspaces.append(Workspace(
+                "handyman", deps.handyman_cfg.business.name,
+                "/dashboard/handyman/voice", "/dashboard/handyman", "mic",
+            ))
         app.include_router(build_auth_router(
             deps.cfg,
             deps.dashboard_password,
             username=deps.dashboard_username,
-            trailer_enabled=deps.trailer_cfg is not None,
-            trailer_label=(deps.trailer_cfg.business.name if deps.trailer_cfg is not None
-                           else "Trailer Rental"),
+            workspaces=workspaces,
         ))
         app.include_router(
             build_dashboard(
@@ -276,6 +294,20 @@ def create_app(deps: AppDeps, *, lifespan: Any | None = None) -> FastAPI:
                     deps.dashboard_password,
                     connect_gemini=deps.trailer_connect_gemini,
                     tool_handler_getter=lambda: deps.trailer_tool_handler,
+                )
+            )
+
+        # The handyman (Task Titan) console section, same lazy pattern as the trailer one.
+        from clinic_agent.web.handyman_dashboard import build_handyman_dashboard
+
+        if deps.handyman_cfg is not None:
+            app.include_router(
+                build_handyman_dashboard(
+                    deps.handyman_cfg,
+                    lambda: deps.pool,
+                    deps.dashboard_password,
+                    connect_gemini=deps.handyman_connect_gemini,
+                    tool_handler_getter=lambda: deps.handyman_tool_handler,
                 )
             )
 

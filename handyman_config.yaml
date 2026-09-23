@@ -1,0 +1,54 @@
+# Handyman-business configuration. Loaded only when HANDYMAN_CONFIG points here
+# (or this file is present); absent = the handyman agent is simply not wired.
+#
+# NOTE: service_area is Knoxville, TN. The phone/transfer number below is a placeholder --
+# the real website number (978...) is a Massachusetts line, so update it for the TN
+# operation. No license number is quoted on calls; the prompt says "licensed and insured".
+
+business:
+  name: Task Titan Handyman
+  owner_name: Michael
+  timezone: America/New_York
+  service_area: Knoxville, Tennessee and the surrounding areas
+  human_transfer_number: "+15550000000"
+  phone_display: "(978) 790-7000"
+  email: michael@tasktitanhandyman.com
+
+services:
+  - name: Home improvement & remodeling
+    examples: kitchens, bathrooms, flooring, decks, drywall, painting, doors, windows,
+      cabinets, countertops, tile, basements, additions
+  - name: Repairs & maintenance
+    examples: leaky faucets, running toilets, outlets and switches, lighting, ceiling and
+      exhaust fans, garbage disposals, appliance hookups, general fix-it work
+  - name: Electrical & plumbing
+    examples: fixtures, outlets, switches, water filtration, sinks, faucets, showers
+  - name: Appliance repair
+    examples: washers, dryers, dishwashers, stoves and ovens, microwaves, hood vents
+  - name: Welding & fabrication
+    examples: frame and railing repairs, bumper kits, custom metal and craft projects
+  - name: Hauling, demolition & cleanouts
+    examples: junk and scrap removal, disassembly, demolition, moving help, cleanouts
+  - name: Outdoor & seasonal
+    examples: fencing, siding, gutters, power washing, brush clearing, walkways, patios,
+      snow removal, driveway sealing
+
+faq:
+  - q: What areas do you serve?
+    a: We cover Knoxville, Tennessee and the surrounding areas. If you're nearby, just ask
+      and I'll check.
+  - q: How much do you charge?
+    a: It depends on the job, so Michael gives a free estimate first. Tell me what you need
+      and I'll set that up -- photos help if you have them.
+  - q: Are you licensed and insured?
+    a: Yes, Michael is licensed and insured, with over twenty years of hands-on experience
+      across a lot of trades.
+  - q: Do you do free estimates?
+    a: We do. I can take your details and the job, and Michael will come out or call to give
+      you a free estimate.
+  - q: Can you build something custom from a picture I saw?
+    a: Absolutely -- if you've saved something on Pinterest, TikTok, or Facebook, Michael
+      loves custom builds. Tell me about it and I'll pass it along.
+  - q: How soon can someone come out?
+    a: I can't promise a time on my end, but if you give me the details Michael will reach
+      out to schedule it as soon as he can.

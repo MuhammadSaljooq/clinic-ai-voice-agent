@@ -136,6 +136,17 @@ def build_app():
     else:
         log.info("trailer rental agent disabled (%s not found)", trailer_path)
 
+    # Third agent: the handyman (Task Titan) config + connector, same build-time pattern.
+    handyman_path = pathlib.Path(os.environ.get("HANDYMAN_CONFIG", "handyman_config.yaml"))
+    if handyman_path.exists():
+        from clinic_agent.ai.live_session import build_handyman_connector
+        from clinic_agent.handyman_config import load_handyman_config
+
+        deps.handyman_cfg = load_handyman_config(handyman_path)
+        deps.handyman_connect_gemini = build_handyman_connector(deps.handyman_cfg, settings)
+    else:
+        log.info("handyman agent disabled (%s not found)", handyman_path)
+
     @contextlib.asynccontextmanager
     async def lifespan(_app):
         pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], min_size=2, max_size=10)
@@ -176,6 +187,15 @@ def build_app():
                 "trailer rental agent wired: %s, %d trailer type(s)",
                 deps.trailer_cfg.business.name, len(deps.trailer_cfg.trailer_types),
             )
+
+        # Third agent: build its tool router now that the pool exists. No inventory to seed.
+        if deps.handyman_cfg is not None:
+            from clinic_agent.agent.handyman_tools import HandymanToolRouter
+
+            deps.handyman_tool_handler = HandymanToolRouter(
+                pool=pool, cfg=deps.handyman_cfg, telnyx=telnyx,
+            )
+            log.info("handyman agent wired: %s", deps.handyman_cfg.business.name)
 
         async def on_finished(outcome):
             await record_call(pool, outcome)

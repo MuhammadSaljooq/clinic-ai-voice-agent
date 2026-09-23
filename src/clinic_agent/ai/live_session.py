@@ -161,3 +161,41 @@ def build_rental_connector(
         )
 
     return connect
+
+
+def build_handyman_connector(
+    cfg,
+    settings: ProviderSettings | None = None,
+    *,
+    model: str | None = None,
+    voice: str | None = None,
+    vad: VadTuning | None = None,
+    enable_affective_dialog: bool | None = None,
+) -> Callable[[str | None], Any]:
+    """Like `build_gemini_connector`, but for the handyman (Task Titan) agent: its own
+    prompt, tools, and voice (default distinct from the others; `HANDYMAN_GEMINI_VOICE`)."""
+    from clinic_agent.ai.handyman_live_config import build_handyman_live_config
+
+    client = build_client(settings)
+    model = model or os.environ.get("GEMINI_LIVE_MODEL") or NATIVE_AUDIO_MODEL
+    voice = voice or os.environ.get("HANDYMAN_GEMINI_VOICE") or "Charon"
+    vad = vad or vad_from_env()
+    if enable_affective_dialog is None:
+        enable_affective_dialog = _env_bool(os.environ.get("AI_ENABLE_AFFECTIVE_DIALOG"), True)
+    native_audio = is_native_audio(model)
+    log.info("handyman voice: model=%s voice=%s native_audio=%s", model, voice, native_audio)
+
+    def connect(resumption_handle: str | None):
+        return client.aio.live.connect(
+            model=model,
+            config=build_handyman_live_config(
+                cfg,
+                resumption_handle=resumption_handle,
+                voice=voice,
+                vad=vad,
+                enable_affective_dialog=enable_affective_dialog,
+                native_audio=native_audio,
+            ),
+        )
+
+    return connect

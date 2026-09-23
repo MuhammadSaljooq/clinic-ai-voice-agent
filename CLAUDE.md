@@ -92,6 +92,27 @@ It has its own voice (`TRAILER_GEMINI_VOICE`, default `Puck`) and reuses `SLOT_T
 for signing. The audio bridge (`CallSession`) and the browser test console
 (`render_test_console_body`) are shared; the clinic agent is otherwise untouched.
 
+## Third agent: handyman (Task Titan)
+
+A second parallel agent (spec `docs/superpowers/specs/2026-09-24-handyman-assistant-design.md`),
+wired only when `handyman_config.yaml` exists (env `HANDYMAN_CONFIG`). It is a **lead-intake**
+agent, not a booking agent: no calendar, no slot tokens, no pricing (a handyman quotes after
+seeing the job — the prompt's load-bearing rule is **never quote a price, always offer a free
+estimate**). Files mirror the trailer set: `handyman_config.py`, `ai/handyman_live_config.py`,
+`agent/handyman_tools.py` (`HandymanToolRouter`), `web/handyman_dashboard.py`
+(`/dashboard/handyman/*`), migration `008_handyman.sql`. Its four tools —
+`request_appointment` (a *request*, never a confirmed booking), `capture_lead`, `take_message`
+(personal calls), `answer_question` — do inline inserts (the clinic `_request_callback`
+pattern). Voice `HANDYMAN_GEMINI_VOICE` (default `Charon`). Its console has four pages (voice
+assistant, appointments, transcriptions, leads & messages); the **browser test console
+persists sessions to `handyman_calls`** (source `console`) so the Transcriptions page has data
+before a phone line exists.
+
+The **login workspace picker** (`web/auth.py` `Workspace` + `build_auth_router(..., workspaces=[...])`)
+generalises to N consoles: `app.py` builds the list (clinic always, trailer/handyman when
+configured), the picker shows only with 2+, and the chosen workspace decides the landing page
+(longest-prefix `?next` routing keeps a redirect inside the chosen console).
+
 ## Config, migrations, secrets
 
 - Business config lives in `config.yaml` (providers, hours, appointment types, FAQ,

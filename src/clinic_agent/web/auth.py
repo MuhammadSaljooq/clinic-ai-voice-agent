@@ -17,6 +17,7 @@ import hashlib
 import hmac
 import logging
 import time
+from typing import NamedTuple
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -30,20 +31,41 @@ SESSION_COOKIE = "clinic_session"
 SESSION_MAX_AGE = 12 * 60 * 60  # 12 hours: a working day, then sign in again.
 LOGIN_PATH = "/login"
 DEFAULT_LANDING = "/dashboard/inbox"
-TRAILER_LANDING = "/dashboard/trailer/test"
-TRAILER_PREFIX = "/dashboard/trailer"
 
 
-def _landing_for(workspace: str, next_url: str | None, *, trailer_enabled: bool) -> str:
+class Workspace(NamedTuple):
+    """One selectable console on the login picker. `prefix` scopes which pages belong to
+    it (used to route a ?next to the right workspace); `icon` is a theme icon name."""
+
+    key: str
+    label: str
+    landing: str
+    prefix: str
+    icon: str = "inbox"
+
+
+def _workspace_of(path: str, workspaces: list[Workspace]) -> Workspace | None:
+    """The workspace that owns a path, by longest matching prefix. The clinic prefix
+    ('/dashboard') matches everything, so more specific consoles ('/dashboard/handyman')
+    win for their own pages and the clinic is the natural fallback."""
+    best: Workspace | None = None
+    for w in workspaces:
+        matches = path == w.prefix or path.startswith(w.prefix.rstrip("/") + "/")
+        if matches and (best is None or len(w.prefix) > len(best.prefix)):
+            best = w
+    return best
+
+
+def _landing_for(workspace_key: str, next_url: str | None, workspaces: list[Workspace]) -> str:
     """Where a successful login lands. The workspace the operator picked is authoritative;
     a ?next is honoured only when it belongs to that same workspace (so a session that
     expired mid-page returns there), otherwise we fall back to the workspace home."""
-    wants_trailer = workspace == "trailer" and trailer_enabled
-    home = TRAILER_LANDING if wants_trailer else DEFAULT_LANDING
+    chosen = next((w for w in workspaces if w.key == workspace_key), workspaces[0])
     safe = _safe_next(next_url)
-    if safe.startswith(TRAILER_PREFIX) == wants_trailer:
+    owner = _workspace_of(safe, workspaces)
+    if owner is not None and owner.key == chosen.key:
         return safe
-    return home
+    return chosen.landing
 
 
 def _sign(payload: str, secret: str) -> str:
@@ -124,9 +146,8 @@ def render_login(
     error: str | None = None,
     next_url: str = DEFAULT_LANDING,
     require_username: bool = False,
-    trailer_enabled: bool = False,
-    selected_workspace: str = "clinic",
-    trailer_label: str = "Trailer Rental",
+    workspaces: list[Workspace] | None = None,
+    selected_workspace: str | None = None,
 ) -> str:
     import html
 
@@ -134,20 +155,25 @@ def render_login(
     err = f'<div class="login-err" role="alert">{html.escape(error)}</div>' if error else ""
 
     # Workspace picker: which console the operator lands on after signing in. Only shown
-    # when a second (trailer) agent is actually configured; otherwise it's clinic-only.
+    # when more than one agent is configured; otherwise it's a single-console login.
     workspace_field = ""
-    if trailer_enabled:
-        want_trailer = selected_workspace == "trailer"
-        clinic_name = html.escape(cfg.clinic.name)
-        workspace_field = f"""
-        <div class="wsseg" role="radiogroup" aria-label="Choose a workspace">
-          <input type="radio" id="ws-clinic" name="workspace" value="clinic"
-                 {"" if want_trailer else "checked"}>
-          <label for="ws-clinic">{theme.icon("inbox")}<span>{clinic_name}</span></label>
-          <input type="radio" id="ws-trailer" name="workspace" value="trailer"
-                 {"checked" if want_trailer else ""}>
-          <label for="ws-trailer">{theme.icon("calendar")}<span>{html.escape(trailer_label)}</span></label>
-        </div>"""
+    if workspaces and len(workspaces) > 1:
+        selected = selected_workspace or workspaces[0].key
+        radios = []
+        for w in workspaces:
+            checked = "checked" if w.key == selected else ""
+            radios.append(
+                f'<input type="radio" id="ws-{html.escape(w.key)}" name="workspace" '
+                f'value="{html.escape(w.key)}" {checked}>'
+                f'<label for="ws-{html.escape(w.key)}">{theme.icon(w.icon)}'
+                f'<span>{html.escape(w.label)}</span></label>'
+            )
+        # Two side-by-side reads as a toggle; three or more stack as a clear vertical list.
+        cols = len(workspaces) if len(workspaces) == 2 else 1
+        workspace_field = (
+            f'<div class="wsseg" role="radiogroup" aria-label="Choose a workspace" '
+            f'style="grid-template-columns:repeat({cols},1fr)">{"".join(radios)}</div>'
+        )
     if require_username:
         username_field = """
         <div class="field" style="margin-bottom:16px">
@@ -199,19 +225,22 @@ def build_auth_router(
     password: str,
     *,
     username: str | None = None,
-    trailer_enabled: bool = False,
-    trailer_label: str = "Trailer Rental",
+    workspaces: list[Workspace] | None = None,
 ) -> APIRouter:
     """`username` optional: when set, the login page shows a username field and requires
     it to match (in addition to the password). When None, it's password-only.
 
-    `trailer_enabled` adds a workspace picker (clinic vs trailer) to the login page; the
-    choice decides which console the operator lands on. One session serves both."""
+    `workspaces` (2+) adds a picker to the login page; the choice decides which console the
+    operator lands on. One session serves them all. None/one workspace = no picker."""
     router = APIRouter(tags=["auth"])
     require_username = bool(username)
+    picker = workspaces if (workspaces and len(workspaces) > 1) else None
 
-    def _selected(next_url: str) -> str:
-        return "trailer" if next_url.startswith(TRAILER_PREFIX) else "clinic"
+    def _selected(next_url: str) -> str | None:
+        if not picker:
+            return None
+        owner = _workspace_of(next_url, picker)
+        return owner.key if owner else picker[0].key
 
     @router.get(LOGIN_PATH, response_class=HTMLResponse)
     async def login_form(request: Request, next: str = DEFAULT_LANDING) -> Response:
@@ -220,8 +249,7 @@ def build_auth_router(
         safe = _safe_next(next)
         return HTMLResponse(render_login(
             cfg, next_url=safe, require_username=require_username,
-            trailer_enabled=trailer_enabled, selected_workspace=_selected(safe),
-            trailer_label=trailer_label,
+            workspaces=picker, selected_workspace=_selected(safe),
         ))
 
     @router.post(LOGIN_PATH, response_class=HTMLResponse)
@@ -229,8 +257,11 @@ def build_auth_router(
         form = await read_form(request)
         supplied = str(form.get("password") or "")
         supplied_user = str(form.get("username") or "")
-        workspace = str(form.get("workspace") or "clinic")
-        target = _landing_for(workspace, form.get("next"), trailer_enabled=trailer_enabled)
+        workspace = str(form.get("workspace") or "")
+        if picker:
+            target = _landing_for(workspace, form.get("next"), picker)
+        else:
+            target = _safe_next(str(form.get("next") or DEFAULT_LANDING))
 
         ok = hmac.compare_digest(supplied, password)
         if require_username:
@@ -242,8 +273,7 @@ def build_auth_router(
             return HTMLResponse(
                 render_login(
                     cfg, error=message, next_url=target, require_username=require_username,
-                    trailer_enabled=trailer_enabled, selected_workspace=workspace,
-                    trailer_label=trailer_label,
+                    workspaces=picker, selected_workspace=(workspace or None),
                 ),
                 status_code=status.HTTP_401_UNAUTHORIZED,
             )

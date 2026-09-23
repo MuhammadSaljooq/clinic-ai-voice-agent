@@ -224,7 +224,12 @@ td.num { text-align: right; }
 .btn-primary:disabled { background: var(--mute-ink); opacity: 0.5; cursor: not-allowed; }
 .btn-ghost { background: var(--surface); color: var(--ink-2); border-color: var(--line-2); }
 .btn-ghost:hover { background: var(--surface-2); }
+.btn:not(.btn-primary) { background: var(--surface); color: var(--ink-2); border-color: var(--line-2); }
+.btn:not(.btn-primary):hover { background: var(--surface-2); }
+.btn-sm { padding: 5px 10px; font-size: 12.5px; }
 .btn svg { width: 16px; height: 16px; }
+td.nowrap { white-space: nowrap; }
+td.nowrap form { display: inline; margin: 0 2px 0 0; }
 
 .field { display: block; width: 100%; }
 label.lbl { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-2); margin-bottom: 6px; }
