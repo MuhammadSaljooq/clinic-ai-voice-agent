@@ -86,11 +86,13 @@ async def test_appointments_empty_state(handy):
 async def test_appointments_lists_a_request_and_status_can_change(handy):
     client, pool, _cfg = handy
     rid = await pool.fetchval(
-        "INSERT INTO handyman_appointment_requests (name, phone, job_type, address, preferred_time)"
-        " VALUES ('Ada Lovelace','+18655550100','drywall','West Knoxville','Thursday AM') RETURNING id"
+        "INSERT INTO handyman_appointment_requests (name, phone, email, job_type, address, preferred_time)"
+        " VALUES ('Ada Lovelace','+18655550100','ada@example.com','drywall','West Knoxville','Thursday AM')"
+        " RETURNING id"
     )
     body = (await client.get("/dashboard/handyman/appointments")).text
     assert "Ada Lovelace" in body
+    assert "ada@example.com" in body
     assert "drywall" in body
     assert "requested" in body
 

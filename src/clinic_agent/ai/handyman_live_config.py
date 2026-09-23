@@ -96,13 +96,18 @@ QUESTIONS YOU CAN ANSWER
 {chr(10).join(faq_lines) if faq_lines else "  (none configured)"}
 
 SETTING UP A VISIT OR ESTIMATE (a REQUEST, not a confirmed booking)
+Take the details properly -- name, phone, and email are all REQUIRED before you log it.
 1. Find out what the job is -- what needs doing, and roughly where (their town or address).
-2. Get their name and a good phone number. Read the number back to confirm it, or take the one
-   they're calling from.
-3. Ask when works for them -- a day and a rough time of day is plenty ("Thursday morning").
-4. Read it back in one sentence -- the job, the area, and when -- then log the request with
-   request_appointment.
-5. Confirm warmly and honestly: "Perfect, I've got that down and {owner} will reach out to
+2. Get their FULL NAME.
+3. Get a good PHONE NUMBER and read it back digit by digit to confirm it (or read back the
+   number they're calling from and confirm that's the best one).
+4. Get their EMAIL so {owner} can send the estimate. Read it back to make sure you have it
+   right -- spell it out if there's any doubt. If they genuinely don't have an email, don't
+   force it: tell them you'll have {owner} call them back instead and take a callback lead.
+5. Ask when works for them -- a day and a rough time of day is plenty ("Thursday morning").
+6. Read the whole thing back in one sentence -- name, phone, email, the job, the area, and
+   when -- then log the request with request_appointment.
+7. Confirm warmly and honestly: "Perfect, I've got that down and {owner} will reach out to
    confirm the time and give you a free estimate." Never say it's booked.
 
 TAKING A CALLBACK LEAD
@@ -146,14 +151,17 @@ def build_handyman_tools(cfg: HandymanConfig, *, native_audio: bool = True) -> l
             description=(
                 "Log a REQUEST for a visit or free estimate for the owner to confirm -- this "
                 "is NOT a confirmed booking and you must not tell the caller it is booked. "
-                "Collect at least a phone number; a name, the job, the area, and a preferred "
-                "time are strongly preferred."
+                "A proper booking REQUIRES the caller's full name, a contact phone number, and "
+                "a valid email address. Collect and read back all three before calling this; "
+                "also capture the job, the area, and a preferred time. If the caller has no "
+                "email, do not call this -- take a callback lead with capture_lead instead."
             ),
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={
-                    "name": _string("The caller's name."),
+                    "name": _string("The caller's full name."),
                     "phone": _string("A contact phone number in E.164 form, e.g. +18651234567."),
+                    "email": _string("The caller's email address, e.g. name@example.com."),
                     "job_type": _string("A short label for the work, e.g. 'drywall repair'."),
                     "description": _string("What the caller wants done, in their words."),
                     "address": _string("The town or address where the work is."),
@@ -161,7 +169,7 @@ def build_handyman_tools(cfg: HandymanConfig, *, native_audio: bool = True) -> l
                         "When they'd like the visit, in plain words, e.g. 'Thursday morning'."
                     ),
                 },
-                required=["phone"],
+                required=["name", "phone", "email"],
             ),
         ),
         types.FunctionDeclaration(

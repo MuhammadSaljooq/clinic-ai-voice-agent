@@ -176,7 +176,7 @@ def build_handyman_dashboard(
             return HTMLResponse(_shell(cfg, "appointments", '<div class="card">No database.</div>'))
         rows = await pool.fetch(
             """
-            SELECT id, name, phone, job_type, description, address, preferred_time,
+            SELECT id, name, phone, email, job_type, description, address, preferred_time,
                    status::text AS status, created_at
             FROM handyman_appointment_requests
             ORDER BY created_at DESC LIMIT 200
@@ -203,6 +203,7 @@ def build_handyman_dashboard(
                     f'<td class="mono subtle">{_local(r["created_at"], cfg)}</td>'
                     f"<td>{html.escape(r['name'] or '-')}</td>"
                     f'<td class="mono subtle">{html.escape(r["phone"])}</td>'
+                    f'<td class="subtle">{html.escape(r["email"] or "-")}</td>'
                     f"<td>{job_cell}</td>"
                     f"<td>{html.escape(r['address'] or '-')}</td>"
                     f"<td>{html.escape(r['preferred_time'] or '-')}</td>"
@@ -211,7 +212,7 @@ def build_handyman_dashboard(
                     "</tr>"
                 )
             body = _table(
-                ["Taken", "Name", "Phone", "Job", "Where", "Preferred", "Status", ""], trs
+                ["Taken", "Name", "Phone", "Email", "Job", "Where", "Preferred", "Status", ""], trs
             )
         return HTMLResponse(_shell(cfg, "appointments", body, lead="Visit & estimate requests"))
 

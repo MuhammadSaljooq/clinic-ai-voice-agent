@@ -9,6 +9,7 @@ results so the agent can recover mid-sentence rather than the call falling over.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -24,6 +25,11 @@ log = logging.getLogger(__name__)
 
 NAME_KEY = "caller_name"
 PHONE_KEY = "caller_phone"
+EMAIL_KEY = "caller_email"
+
+# Deliberately permissive: one @, a dot in the domain, no spaces. Enough to catch a
+# mis-heard or half-given address without rejecting unusual-but-valid ones.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 TRANSFER_RECOVERY = "Apologise briefly and offer to put the caller through to a person."
 
@@ -56,11 +62,17 @@ class HandymanToolRouter:
     def _phone(self, args: dict, ctx: ToolContext) -> str | None:
         return (args.get("phone") or "").strip() or ctx.state.get(PHONE_KEY) or ctx.caller_number
 
-    def _remember(self, ctx: ToolContext, name: str | None, phone: str | None) -> None:
+    def _email(self, args: dict, ctx: ToolContext) -> str | None:
+        return (args.get("email") or "").strip() or ctx.state.get(EMAIL_KEY) or None
+
+    def _remember(self, ctx: ToolContext, name: str | None, phone: str | None,
+                  email: str | None = None) -> None:
         if name:
             ctx.state[NAME_KEY] = name
         if phone:
             ctx.state[PHONE_KEY] = phone
+        if email:
+            ctx.state[EMAIL_KEY] = email
 
     async def _answer_question(self, args: dict, ctx: ToolContext) -> dict:
         entry = match_faq(str(args.get("question", "")), self.cfg.faq)
@@ -75,13 +87,36 @@ class HandymanToolRouter:
         return {"answer": entry.a}
 
     async def _request_appointment(self, args: dict, ctx: ToolContext) -> dict:
+        # A proper booking needs a name, a phone, and a valid email. Missing pieces come
+        # back as a structured recovery so the agent asks for exactly what's left.
         name = self._name(args, ctx)
         phone = self._phone(args, ctx)
+        email = self._email(args, ctx)
+
+        if not name:
+            return {
+                "error": "the caller's name is required",
+                "recovery": "Ask the caller for their full name.",
+            }
         if not phone:
             return {
                 "error": "a contact phone number is required",
-                "recovery": "Ask the caller for the best number to reach them on.",
+                "recovery": "Ask the caller for the best number to reach them on, and read it back.",
             }
+        if not email:
+            return {
+                "error": "an email address is required for the booking",
+                "recovery": (
+                    "Ask for their email so the owner can send the estimate. If they truly "
+                    "don't have one, offer to take it as a callback lead instead with capture_lead."
+                ),
+            }
+        if not _EMAIL_RE.match(email):
+            return {
+                "error": f"the email {email!r} does not look valid",
+                "recovery": "Read the email back and ask them to confirm or correct it.",
+            }
+
         job_type = (args.get("job_type") or "").strip() or None
         description = (args.get("description") or "").strip() or None
         address = (args.get("address") or "").strip() or None
@@ -90,12 +125,12 @@ class HandymanToolRouter:
         await self.pool.execute(
             """
             INSERT INTO handyman_appointment_requests
-                (name, phone, job_type, description, address, preferred_time)
-            VALUES ($1, $2, $3, $4, $5, $6)
+                (name, phone, email, job_type, description, address, preferred_time)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             """,
-            name, phone, job_type, description, address, preferred_time,
+            name, phone, email, job_type, description, address, preferred_time,
         )
-        self._remember(ctx, name, phone)
+        self._remember(ctx, name, phone, email)
         return {
             "requested": True,
             "say": (

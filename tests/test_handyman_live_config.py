@@ -61,6 +61,7 @@ def test_half_cascade_config_strips_native_only_features():
     assert cfg.thinking_config is None
 
 
-def test_request_appointment_only_requires_a_phone():
+def test_request_appointment_requires_name_phone_and_email():
     decls = {d.name: d for t in build_handyman_tools(CFG) for d in t.function_declarations}
-    assert decls["request_appointment"].parameters.required == ["phone"]
+    assert set(decls["request_appointment"].parameters.required) == {"name", "phone", "email"}
+    assert "email" in decls["request_appointment"].parameters.properties

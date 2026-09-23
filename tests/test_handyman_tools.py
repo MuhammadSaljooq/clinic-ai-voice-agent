@@ -52,28 +52,33 @@ async def test_answer_question_refuses_to_guess_a_price(router):
     assert "price" in res["recovery"].lower()
 
 
-async def test_request_appointment_writes_a_request(router):
+async def test_request_appointment_writes_a_full_request(router):
     route, _, pool = router
     res = await route(
         "request_appointment",
-        {"name": "Dana Scully", "phone": "+18655551111", "job_type": "drywall repair",
-         "description": "hole in the hallway wall", "address": "West Knoxville",
-         "preferred_time": "Thursday morning"},
+        {"name": "Dana Scully", "phone": "+18655551111", "email": "dana@example.com",
+         "job_type": "drywall repair", "description": "hole in the hallway wall",
+         "address": "West Knoxville", "preferred_time": "Thursday morning"},
         new_ctx(caller=""),
     )
     assert res.get("requested") is True
     row = await pool.fetchrow(
-        "SELECT name, phone, job_type, address, preferred_time, status::text AS status"
+        "SELECT name, phone, email, job_type, address, preferred_time, status::text AS status"
         " FROM handyman_appointment_requests WHERE phone=$1", "+18655551111"
     )
     assert row["name"] == "Dana Scully"
+    assert row["email"] == "dana@example.com"
     assert row["job_type"] == "drywall repair"
     assert row["status"] == "requested"
 
 
 async def test_request_appointment_falls_back_to_caller_id_for_the_phone(router):
     route, _, pool = router
-    res = await route("request_appointment", {"description": "fix a fence"}, new_ctx())
+    res = await route(
+        "request_appointment",
+        {"name": "Dana Scully", "email": "dana@example.com", "description": "fix a fence"},
+        new_ctx(),  # phone comes from caller ID
+    )
     assert res.get("requested") is True
     count = await pool.fetchval(
         "SELECT count(*) FROM handyman_appointment_requests WHERE phone=$1", CALLER
@@ -81,11 +86,43 @@ async def test_request_appointment_falls_back_to_caller_id_for_the_phone(router)
     assert count == 1
 
 
+async def test_request_appointment_requires_a_name(router):
+    route, _, _ = router
+    res = await route(
+        "request_appointment", {"phone": "+18655551111", "email": "x@y.com"}, new_ctx(caller="")
+    )
+    assert "requested" not in res
+    assert "name" in res["error"]
+
+
 async def test_request_appointment_needs_a_phone_when_there_is_no_caller_id(router):
     route, _, _ = router
-    res = await route("request_appointment", {"description": "x"}, new_ctx(caller=""))
+    res = await route(
+        "request_appointment", {"name": "Dana", "email": "x@y.com"}, new_ctx(caller="")
+    )
     assert "requested" not in res
     assert "phone" in res["error"]
+
+
+async def test_request_appointment_requires_an_email(router):
+    route, _, _ = router
+    res = await route(
+        "request_appointment", {"name": "Dana", "phone": "+18655551111"}, new_ctx(caller="")
+    )
+    assert "requested" not in res
+    assert "email" in res["error"]
+    assert "capture_lead" in res["recovery"]  # offer a callback lead if they have no email
+
+
+async def test_request_appointment_rejects_a_malformed_email(router):
+    route, _, _ = router
+    res = await route(
+        "request_appointment",
+        {"name": "Dana", "phone": "+18655551111", "email": "dana-at-example"},
+        new_ctx(caller=""),
+    )
+    assert "requested" not in res
+    assert "valid" in res["error"]
 
 
 async def test_capture_lead_writes_a_lead(router):
