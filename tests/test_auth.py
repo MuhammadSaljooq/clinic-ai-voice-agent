@@ -136,3 +136,67 @@ async def test_an_open_redirect_next_is_refused():
             headers={"content-type": "application/x-www-form-urlencoded"},
         )
         assert r.headers["location"] == "/dashboard/inbox"
+
+
+# --- workspace picker ----------------------------------------------------------
+
+FORM = {"content-type": "application/x-www-form-urlencoded"}
+
+
+def _ws_app():
+    app = FastAPI()
+    app.include_router(build_auth_router(CFG, PW, trailer_enabled=True, trailer_label="Trailer Rental"))
+    return app
+
+
+async def test_the_picker_is_hidden_when_no_second_workspace_exists():
+    async with AsyncClient(transport=ASGITransport(app=_app()), base_url="http://t") as c:
+        page = (await c.get("/login")).text
+        assert 'name="workspace"' not in page
+
+
+async def test_the_picker_offers_both_workspaces_when_the_trailer_agent_is_configured():
+    async with AsyncClient(transport=ASGITransport(app=_ws_app()), base_url="http://t") as c:
+        page = (await c.get("/login")).text
+        assert 'value="clinic"' in page and 'value="trailer"' in page
+        assert CFG.clinic.name in page and "Trailer Rental" in page
+
+
+async def test_choosing_the_clinic_workspace_lands_on_the_clinic_console():
+    async with AsyncClient(transport=ASGITransport(app=_ws_app()), base_url="http://t") as c:
+        r = await c.post("/login", content=f"password={PW}&workspace=clinic", headers=FORM)
+        assert r.headers["location"] == "/dashboard/inbox"
+
+
+async def test_choosing_the_trailer_workspace_lands_on_the_trailer_console():
+    async with AsyncClient(transport=ASGITransport(app=_ws_app()), base_url="http://t") as c:
+        r = await c.post("/login", content=f"password={PW}&workspace=trailer", headers=FORM)
+        assert r.headers["location"] == "/dashboard/trailer/test"
+
+
+async def test_a_trailer_choice_is_ignored_when_the_trailer_agent_is_not_configured():
+    """No trailer agent means the trailer landing must not be reachable via a forged field."""
+    async with AsyncClient(transport=ASGITransport(app=_app()), base_url="http://t") as c:
+        r = await c.post("/login", content=f"password={PW}&workspace=trailer", headers=FORM)
+        assert r.headers["location"] == "/dashboard/inbox"
+
+
+async def test_a_next_into_the_other_workspace_falls_back_to_the_chosen_home():
+    """Picked clinic but ?next points into trailer -> land on the clinic home, not trailer."""
+    async with AsyncClient(transport=ASGITransport(app=_ws_app()), base_url="http://t") as c:
+        r = await c.post(
+            "/login",
+            content=f"password={PW}&workspace=clinic&next=%2Fdashboard%2Ftrailer%2Finventory",
+            headers=FORM,
+        )
+        assert r.headers["location"] == "/dashboard/inbox"
+
+
+async def test_a_next_within_the_chosen_workspace_is_honoured():
+    async with AsyncClient(transport=ASGITransport(app=_ws_app()), base_url="http://t") as c:
+        r = await c.post(
+            "/login",
+            content=f"password={PW}&workspace=trailer&next=%2Fdashboard%2Ftrailer%2Finventory",
+            headers=FORM,
+        )
+        assert r.headers["location"] == "/dashboard/trailer/inventory"

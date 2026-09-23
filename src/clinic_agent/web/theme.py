@@ -327,6 +327,21 @@ textarea { resize: vertical; min-height: 76px; line-height: 1.45; }
 .login-err { background: var(--bad-bg); color: var(--bad-ink); font-size: 13px; padding: 9px 12px; border-radius: var(--radius-sm); margin-bottom: 16px; }
 .login-foot { text-align: center; font-size: 11.5px; color: var(--ink-3); margin-top: 18px; }
 
+/* Workspace picker: a two-up segmented control on the login page. */
+.wsseg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 20px;
+  padding: 5px; background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: var(--radius); }
+.wsseg input { position: absolute; opacity: 0; pointer-events: none; }
+.wsseg label { display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 10px 8px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 550;
+  color: var(--ink-2); cursor: pointer; text-align: center; line-height: 1.2;
+  transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease; }
+.wsseg label svg { width: 16px; height: 16px; flex: none; }
+.wsseg label:hover { color: var(--ink); }
+.wsseg input:checked + label { background: var(--surface); color: var(--primary-weak-ink);
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.06), inset 0 0 0 1px var(--line); }
+.wsseg input:focus-visible + label { outline: 2px solid var(--primary); outline-offset: 1px; }
+
 /* --- responsive -------------------------------------------------------------- */
 @media (max-width: 900px) {
   .inbox { grid-template-columns: 1fr; }
@@ -462,7 +477,6 @@ def shell(
     <nav class="nav" aria-label="Sections">{''.join(links)}</nav>
     <div class="rail-foot">
       <div class="rail-status"><span class="dot {dot}"></span>{html.escape(status_text)}</div>
-      <a class="logout" href="/dashboard/trailer/test" style="text-decoration:none">{icon("calendar")}<span>Trailer rentals</span></a>
       <form method="post" action="/logout">
         <button class="logout" type="submit">{icon("logout")}<span>Sign out</span></button>
       </form>

@@ -243,7 +243,14 @@ def create_app(deps: AppDeps, *, lifespan: Any | None = None) -> FastAPI:
         # pool, telnyx and the sender number are resolved lazily: the lifespan fills
         # them in after the app is built. The login page and session live at the app
         # root; the console under /dashboard.
-        app.include_router(build_auth_router(deps.cfg, deps.dashboard_password, username=deps.dashboard_username))
+        app.include_router(build_auth_router(
+            deps.cfg,
+            deps.dashboard_password,
+            username=deps.dashboard_username,
+            trailer_enabled=deps.trailer_cfg is not None,
+            trailer_label=(deps.trailer_cfg.business.name if deps.trailer_cfg is not None
+                           else "Trailer Rental"),
+        ))
         app.include_router(
             build_dashboard(
                 deps.cfg,

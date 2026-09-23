@@ -51,7 +51,6 @@ def _shell(cfg: RentalConfig, active: str, body: str, *, lead: str = "", full_bl
       <div><div class="name">{name}</div><div class="sub">Trailer rentals</div></div></div>
     <nav class="nav" aria-label="Sections">{links}</nav>
     <div class="rail-foot">
-      <a class="logout" href="/dashboard/inbox" style="text-decoration:none">{icon("logout")}<span>Clinic console</span></a>
       <form method="post" action="/logout"><button class="logout" type="submit">{icon("logout")}<span>Sign out</span></button></form>
     </div>
   </aside>

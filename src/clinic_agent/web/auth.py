@@ -30,6 +30,20 @@ SESSION_COOKIE = "clinic_session"
 SESSION_MAX_AGE = 12 * 60 * 60  # 12 hours: a working day, then sign in again.
 LOGIN_PATH = "/login"
 DEFAULT_LANDING = "/dashboard/inbox"
+TRAILER_LANDING = "/dashboard/trailer/test"
+TRAILER_PREFIX = "/dashboard/trailer"
+
+
+def _landing_for(workspace: str, next_url: str | None, *, trailer_enabled: bool) -> str:
+    """Where a successful login lands. The workspace the operator picked is authoritative;
+    a ?next is honoured only when it belongs to that same workspace (so a session that
+    expired mid-page returns there), otherwise we fall back to the workspace home."""
+    wants_trailer = workspace == "trailer" and trailer_enabled
+    home = TRAILER_LANDING if wants_trailer else DEFAULT_LANDING
+    safe = _safe_next(next_url)
+    if safe.startswith(TRAILER_PREFIX) == wants_trailer:
+        return safe
+    return home
 
 
 def _sign(payload: str, secret: str) -> str:
@@ -110,11 +124,30 @@ def render_login(
     error: str | None = None,
     next_url: str = DEFAULT_LANDING,
     require_username: bool = False,
+    trailer_enabled: bool = False,
+    selected_workspace: str = "clinic",
+    trailer_label: str = "Trailer Rental",
 ) -> str:
     import html
 
     brand = "Next Higher Solutions"
     err = f'<div class="login-err" role="alert">{html.escape(error)}</div>' if error else ""
+
+    # Workspace picker: which console the operator lands on after signing in. Only shown
+    # when a second (trailer) agent is actually configured; otherwise it's clinic-only.
+    workspace_field = ""
+    if trailer_enabled:
+        want_trailer = selected_workspace == "trailer"
+        clinic_name = html.escape(cfg.clinic.name)
+        workspace_field = f"""
+        <div class="wsseg" role="radiogroup" aria-label="Choose a workspace">
+          <input type="radio" id="ws-clinic" name="workspace" value="clinic"
+                 {"" if want_trailer else "checked"}>
+          <label for="ws-clinic">{theme.icon("inbox")}<span>{clinic_name}</span></label>
+          <input type="radio" id="ws-trailer" name="workspace" value="trailer"
+                 {"checked" if want_trailer else ""}>
+          <label for="ws-trailer">{theme.icon("calendar")}<span>{html.escape(trailer_label)}</span></label>
+        </div>"""
     if require_username:
         username_field = """
         <div class="field" style="margin-bottom:16px">
@@ -145,6 +178,7 @@ def render_login(
       {err}
       <form method="post" action="{LOGIN_PATH}">
         <input type="hidden" name="next" value="{html.escape(next_url)}">
+        {workspace_field}
         {username_field}
         <div class="field" style="margin-bottom:16px">
           <label class="lbl" for="pw">Password</label>
@@ -160,24 +194,43 @@ def render_login(
 </body></html>"""
 
 
-def build_auth_router(cfg: ClinicConfig, password: str, *, username: str | None = None) -> APIRouter:
+def build_auth_router(
+    cfg: ClinicConfig,
+    password: str,
+    *,
+    username: str | None = None,
+    trailer_enabled: bool = False,
+    trailer_label: str = "Trailer Rental",
+) -> APIRouter:
     """`username` optional: when set, the login page shows a username field and requires
-    it to match (in addition to the password). When None, it's password-only."""
+    it to match (in addition to the password). When None, it's password-only.
+
+    `trailer_enabled` adds a workspace picker (clinic vs trailer) to the login page; the
+    choice decides which console the operator lands on. One session serves both."""
     router = APIRouter(tags=["auth"])
     require_username = bool(username)
+
+    def _selected(next_url: str) -> str:
+        return "trailer" if next_url.startswith(TRAILER_PREFIX) else "clinic"
 
     @router.get(LOGIN_PATH, response_class=HTMLResponse)
     async def login_form(request: Request, next: str = DEFAULT_LANDING) -> Response:
         if verify_token(request.cookies.get(SESSION_COOKIE), password):
             return RedirectResponse(_safe_next(next), status_code=status.HTTP_303_SEE_OTHER)
-        return HTMLResponse(render_login(cfg, next_url=_safe_next(next), require_username=require_username))
+        safe = _safe_next(next)
+        return HTMLResponse(render_login(
+            cfg, next_url=safe, require_username=require_username,
+            trailer_enabled=trailer_enabled, selected_workspace=_selected(safe),
+            trailer_label=trailer_label,
+        ))
 
     @router.post(LOGIN_PATH, response_class=HTMLResponse)
     async def login_submit(request: Request) -> Response:
         form = await read_form(request)
         supplied = str(form.get("password") or "")
         supplied_user = str(form.get("username") or "")
-        target = _safe_next(str(form.get("next") or DEFAULT_LANDING))
+        workspace = str(form.get("workspace") or "clinic")
+        target = _landing_for(workspace, form.get("next"), trailer_enabled=trailer_enabled)
 
         ok = hmac.compare_digest(supplied, password)
         if require_username:
@@ -187,7 +240,11 @@ def build_auth_router(cfg: ClinicConfig, password: str, *, username: str | None 
             message = ("That username or password is not correct." if require_username
                        else "That password is not correct.")
             return HTMLResponse(
-                render_login(cfg, error=message, next_url=target, require_username=require_username),
+                render_login(
+                    cfg, error=message, next_url=target, require_username=require_username,
+                    trailer_enabled=trailer_enabled, selected_workspace=workspace,
+                    trailer_label=trailer_label,
+                ),
                 status_code=status.HTTP_401_UNAUTHORIZED,
             )
 
