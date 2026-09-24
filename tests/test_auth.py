@@ -129,6 +129,20 @@ async def test_username_and_password_both_required_when_username_configured():
         assert (await c.get("/guarded")).json() == {"ok": True}
 
 
+async def test_any_of_several_configured_usernames_can_sign_in():
+    """A comma-separated DASHBOARD_USERNAME accepts each username, all sharing the password."""
+    FORM = {"content-type": "application/x-www-form-urlencoded"}
+    app = FastAPI()
+    app.include_router(build_auth_router(CFG, PW, username="adrian@nhs.com, tasktitan@nhs.com"))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        for user in ("adrian@nhs.com", "tasktitan@nhs.com"):
+            r = await c.post("/login", content=f"username={user}&password={PW}", headers=FORM)
+            assert r.status_code == 303, f"{user} should be accepted"
+        # an unlisted username is still rejected
+        bad = await c.post("/login", content=f"username=intruder@nhs.com&password={PW}", headers=FORM)
+        assert bad.status_code == 401
+
+
 async def test_an_open_redirect_next_is_refused():
     """?next must stay same-site; an absolute URL falls back to the default landing."""
     async with AsyncClient(transport=ASGITransport(app=_app()), base_url="http://t") as c:

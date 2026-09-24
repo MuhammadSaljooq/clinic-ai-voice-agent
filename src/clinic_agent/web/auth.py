@@ -228,12 +228,14 @@ def build_auth_router(
     workspaces: list[Workspace] | None = None,
 ) -> APIRouter:
     """`username` optional: when set, the login page shows a username field and requires
-    it to match (in addition to the password). When None, it's password-only.
+    it to match (in addition to the password). Accepts several usernames as a comma-separated
+    string (any one is valid, all sharing the password). When None, it's password-only.
 
     `workspaces` (2+) adds a picker to the login page; the choice decides which console the
     operator lands on. One session serves them all. None/one workspace = no picker."""
     router = APIRouter(tags=["auth"])
-    require_username = bool(username)
+    allowed_usernames = [u.strip() for u in (username or "").split(",") if u.strip()]
+    require_username = bool(allowed_usernames)
     picker = workspaces if (workspaces and len(workspaces) > 1) else None
 
     def _selected(next_url: str) -> str | None:
@@ -265,7 +267,10 @@ def build_auth_router(
 
         ok = hmac.compare_digest(supplied, password)
         if require_username:
-            ok = hmac.compare_digest(supplied_user, username) and ok
+            # Any configured username is valid (all share the password). Compare against
+            # each so a mismatch is still constant-time per candidate.
+            user_ok = any(hmac.compare_digest(supplied_user, u) for u in allowed_usernames)
+            ok = user_ok and ok
         if not ok:
             log.warning("failed dashboard login attempt")
             message = ("That username or password is not correct." if require_username
