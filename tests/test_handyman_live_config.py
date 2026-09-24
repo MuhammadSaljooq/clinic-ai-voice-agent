@@ -61,6 +61,32 @@ def test_half_cascade_config_strips_native_only_features():
     assert cfg.thinking_config is None
 
 
+def test_the_prompt_is_bilingual_english_and_spanish():
+    text = build_handyman_system_instruction(CFG)
+    assert "Spanish" in text
+    assert "only speaks English" not in text  # the exact failure the caller hit
+    assert "espanol" in text.lower()
+
+
+def test_the_prompt_understands_the_job_before_taking_contact_details():
+    text = build_handyman_system_instruction(CFG)
+    assert "UNDERSTAND THE JOB FIRST" in text
+    assert "painting" in text.lower()  # the concrete example the owner reported
+
+
+def test_the_prompt_has_guardrails_against_going_off_task_and_prompt_injection():
+    text = build_handyman_system_instruction(CFG)
+    assert "GUARDRAILS" in text
+    assert "ignore your instructions" in text.lower()  # prompt-injection resistance
+    assert "privacy" in text.lower()
+
+
+def test_the_prompt_does_not_open_with_a_911_line():
+    """911 is a clinic-only greeting; the handyman opening must not mention it."""
+    text = build_handyman_system_instruction(CFG)
+    assert "911" not in text
+
+
 def test_request_appointment_requires_name_phone_and_email():
     decls = {d.name: d for t in build_handyman_tools(CFG) for d in t.function_declarations}
     assert set(decls["request_appointment"].parameters.required) == {"name", "phone", "email"}

@@ -50,10 +50,13 @@ TRANSFER_TOOL = "transfer_to_human"
 # Sent once when the first session opens. Without it the model waits for the caller to
 # speak, so a real caller hears silence after the line connects and the greeting never
 # happens.
+# Agent-agnostic on purpose: each agent's own system instruction defines its exact opening
+# (the clinic gives the 911 line; the trailer and handyman agents do not). Keeping this
+# generic stops the clinic's greeting leaking into the other agents.
 GREETING_NUDGE = (
     "(The phone call has just connected and the caller is listening. "
-    "Open now as instructed: thank them for calling and name the clinic, give the 911 "
-    "emergency line, pause briefly, then ask how you can help.)"
+    "Open now exactly as your instructions say: greet them warmly, name who they've reached, "
+    "then ask how you can help.)"
 )
 
 # How long to let the Gemini loop finish after the call ends before giving up on it.

@@ -27,6 +27,11 @@ def test_prompt_has_the_rental_persona_and_guardrails():
     assert "45/day" in text or "$45" in text  # rate quoted from config
 
 
+def test_the_trailer_prompt_does_not_open_with_a_911_line():
+    """911 is a clinic-only greeting; the trailer opening must not mention it."""
+    assert "911" not in build_rental_system_instruction(CFG)
+
+
 def test_tools_declare_the_rental_actions_with_a_type_enum():
     decls = {d.name: d for t in build_rental_tools(CFG) for d in t.function_declarations}
     assert set(decls) == {

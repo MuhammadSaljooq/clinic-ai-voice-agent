@@ -321,7 +321,9 @@ async def test_the_agent_is_prompted_to_greet_when_the_call_connects():
 
     assert len(gemini.client_content) == 1
     nudge = str(gemini.client_content[0]).lower()
-    assert "911" in nudge and "help" in nudge  # prompts the opening (thanks + 911 + how can I help)
+    # Agent-agnostic: nudges the opening, but the exact greeting (incl. any 911 line) lives
+    # in each agent's own system instruction, not this shared nudge.
+    assert "greet" in nudge and "help" in nudge
 
 
 async def test_the_greeting_is_not_repeated_after_a_reconnect():
